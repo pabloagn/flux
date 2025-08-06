@@ -12,7 +12,7 @@ dist/
 venv/
 
 # Rust
-/target
+**/target/
 /Cargo.lock
 /result
 /result-*

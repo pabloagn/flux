@@ -1,1 +1,0 @@
-/home/pabloagn/dev/flux/gui/target/debug/flux-gui: /home/pabloagn/dev/flux/gui/src/app.rs /home/pabloagn/dev/flux/gui/src/bridge/kafka.rs /home/pabloagn/dev/flux/gui/src/bridge/mod.rs /home/pabloagn/dev/flux/gui/src/main.rs
