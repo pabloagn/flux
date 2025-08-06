@@ -9,13 +9,16 @@
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
+# Environment Variables -----------------------------------------------------------
+export UV_NO_PROGRESS := "true"
+export RUST_BACKTRACE := "1"
 
 # Paths -----------------------------------------------------------
-ROOT        := "{{justfile_dir()}}"
-POC_DIR     := "{{ROOT}}/poc"
-CORE_DIR    := "{{ROOT}}/core"
-GUI_DIR     := "{{ROOT}}/gui"
-SCRIPTS_DIR := "{{ROOT}}/scripts"
+ROOT := justfile_directory()
+POC_DIR     := ROOT + "/poc"
+CORE_DIR    := ROOT + "/core"
+GUI_DIR     := ROOT + "/gui"
+SCRIPTS_DIR := POC_DIR + "/scripts"
 
 # Help
 default:
@@ -37,11 +40,13 @@ core-shell:
 # Stack lifecycle -------------------------------------------------
 # Initialise workspace & copy compose file
 setup:
-	@flux-setup
+  @rm -f poc/docker-compose.yml
+  @flux-setup
 
 # Boot Kafka, ClickHouse, NATS, GlassFlow
 start:
   @flux-start
+
 # Stop containers
 stop:           
 	@flux-stop
@@ -53,6 +58,7 @@ status:
 stack-restart: stop start
 
 # Kafka -----------------------------------------------------------
+
 # Idempotent creation of required Kafka topics
 topics-create:
 	@"{{SCRIPTS_DIR}}/create_topics.sh"
@@ -82,6 +88,7 @@ clickhouse-count table='flux.cell_metrics':
 glassflow-setup:
 	@"{{SCRIPTS_DIR}}/setup_glassflow.py"
 
+# Delete glassflow pipeline
 glassflow-delete:
 	@"{{SCRIPTS_DIR}}/delete_glassflow_pipeline.py"
 
@@ -89,7 +96,7 @@ glassflow-delete:
 
 # Run Python plant simulation for N seconds
 sim time="60":
-	cd "{{POC_DIR}}" && uv pip sync >/dev/null && \
+	cd "{{POC_DIR}}" && uv sync >/dev/null && \
 	  python "{{SCRIPTS_DIR}}/run_simulation.py" -t {{time}}
 
 # Build & test ----------------------------------------------------
@@ -102,28 +109,35 @@ core-build:
 core-test:
 	@cd "{{CORE_DIR}}" && cargo test
 
+# Build GUI
 gui-build:
 	@cd "{{GUI_DIR}}" && cargo build --release
 
+# Run GUI
 gui-run:
 	@cd "{{GUI_DIR}}" && cargo run --release
 
-poc-test:       # pytest suite
+# Pytest suite
+poc-test:
 	@cd "{{POC_DIR}}" && pytest -q
 
 # Lint / format ---------------------------------------------------
+# Lint code using ruff
 lint:
 	@ruff check "{{POC_DIR}}/flux" "{{SCRIPTS_DIR}}" --fix
 
+# Format code using ruff
 format:
 	@ruff format "{{POC_DIR}}/flux" "{{SCRIPTS_DIR}}"
 	@cd "{{CORE_DIR}}" && cargo fmt
 	@cd "{{GUI_DIR}}"  && cargo fmt
 
 # Clean-ups -------------------------------------------------------
+# Clean docker images
 docker-clean:
 	@docker system prune -f
 
+# Clean rust targets
 target-clean:
 	@rm -rf "{{CORE_DIR}}/target" "{{GUI_DIR}}/target"
 

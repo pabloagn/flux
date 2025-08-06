@@ -94,7 +94,7 @@
               environment:
                 GLASSFLOW_LOG_FILE_PATH: /tmp/logs/glassflow
                 GLASSFLOW_NATS_SERVER: nats:4222
-              depends_on: [ kafka clickhouse nats ]
+              depends_on: [ kafka, clickhouse, nats ]
         '';
 
         # ─────────────── Helper Scripts ────────────────

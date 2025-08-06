@@ -16,6 +16,7 @@ dependencies = [
   "kafka-python",
   "clickhouse-driver",
   "glassflow-clickhouse-etl",
+  "rich"
 ]
 
 [project.optional-dependencies]
