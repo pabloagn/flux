@@ -1,0 +1,45 @@
+version: '3.8'
+services:
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - ./config/clickhouse:/etc/clickhouse-server/config.d
+
+  glassflow:
+    image: glassflow/clickhouse-etl-be:stable
+    environment:
+      GLASSFLOW_LOG_FILE_PATH: /tmp/logs/glassflow
+      GLASSFLOW_NATS_SERVER: nats:4222
+    ports:
+      - "8080:8080"
+    depends_on:
+      - nats
+
+  nats:
+    image: nats:alpine
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: ["-js"]
