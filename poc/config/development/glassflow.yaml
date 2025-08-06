@@ -1,0 +1,39 @@
+version: "1"
+
+sources:
+  kafka_flux:
+    kind: kafka
+    brokers: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+    consumer_group: flux_ingest
+    topics:
+      - flux.electrical.realtime
+      - flux.process.pressures
+      - flux.process.temperatures
+    format: json
+
+destinations:
+  clickhouse_flux:
+    kind: clickhouse
+    dsn: ${CLICKHOUSE_DSN:-http://default:@clickhouse:8123?database=flux}
+    table: flux.cell_metrics
+    mode: append
+
+pipelines:
+  - name: kafka_to_ch
+    source: kafka_flux
+    destination: clickhouse_flux
+    deduplicate:
+      keys: ["sensor_id", "ts"]
+      window: "1s"
+    mappings:
+      ts: ts
+      unit: unit
+      stack: stack
+      cell: cell
+      voltage_V: voltage_V
+      current_A: current_A
+      pressure_mbar: pressure_mbar
+      temperature_C: temperature_C
+      sensor_id: sensor_id
+      status: status
+      quality: quality

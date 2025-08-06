@@ -1,11 +1,16 @@
 """Sensor simulation with noise and failures."""
 
-import numpy as np
+from __future__ import annotations
 from typing import Dict, Any
+import numpy as np
+
+from flux.utils.log import get_logger
+
+log = get_logger(__name__)
 
 
 class Sensor:
-    """Simulates a real sensor with noise, drift, and failures."""
+    """Simulates a real sensor with noise, drift and failures."""
 
     def __init__(
         self,
@@ -13,18 +18,8 @@ class Sensor:
         sensor_type: str,
         noise_stddev: float = 0.01,
         drift_rate: float = 0.001,
-        failure_prob: float = 0.0001,
+        failure_prob: float = 1e-4,
     ):
-        """
-        Initialize sensor.
-
-        Args:
-            sensor_id: Unique sensor identifier
-            sensor_type: Type of sensor (voltage, temperature, etc.)
-            noise_stddev: Standard deviation of measurement noise (% of value)
-            drift_rate: Drift per hour (% of value)
-            failure_prob: Probability of failure per reading
-        """
         self.sensor_id = sensor_id
         self.sensor_type = sensor_type
         self.noise_stddev = noise_stddev
@@ -32,29 +27,23 @@ class Sensor:
         self.failure_prob = failure_prob
         self.hours_operated = 0.0
         self.is_failed = False
+        log.debug("Sensor %s (%s) created", sensor_id, sensor_type)
 
+    # ------------------------------------------------------------------ read
     def read(self, true_value: float, dt: float = 1.0) -> Dict[str, Any]:
-        """
-        Read sensor value with noise and drift.
-
-        Args:
-            true_value: True process value
-            dt: Time step in seconds
-
-        Returns:
-            Sensor reading dict
-        """
+        """Return a measurement dict with noise / drift / failure applied."""
         self.hours_operated += dt / 3600
 
-        # Check for random failure
-        if np.random.random() < self.failure_prob:
+        # random failure
+        if (not self.is_failed) and np.random.random() < self.failure_prob:
             self.is_failed = True
+            log.warning(
+                "sensor %s failed after %.2f h", self.sensor_id, self.hours_operated
+            )
 
         if self.is_failed:
-            # Failed sensor returns null
             measured_value = None
         else:
-            # Add noise and drift
             noise = np.random.normal(0, self.noise_stddev * true_value)
             drift = self.drift_rate * self.hours_operated * true_value / 100
             measured_value = true_value + noise + drift
