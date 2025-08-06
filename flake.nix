@@ -67,8 +67,9 @@
         dockerComposeFile = pkgs.writeText "docker-compose.yml" ''
           services:
             kafka:
-              image: confluentinc/cp-kafka:latest
+              image: confluentinc/cp-kafka:7.5.5
               environment:
+                KAFKA_BROKER_ID: 1
                 KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
                 KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
                 KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
