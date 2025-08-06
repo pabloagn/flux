@@ -1,1 +1,7 @@
-# .gitignore file for flux project
+/target
+/Cargo.lock
+*.swp
+/result
+/result-*
+.direnv
+.envrc
