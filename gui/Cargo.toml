@@ -1,0 +1,19 @@
+[package]
+name = "flux-gui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ratatui = { version = "0.26", features = ["crossterm"] }
+crossterm = "0.27"
+tokio = { version = "1.38", features = ["rt-multi-thread", "macros", "sync"] }
+futures = "0.3"
+rdkafka = { version = "0.36", features = ["tokio"] }                           # Kafka bridge
+nats = { version = "0.25", optional = true }                                   # future NATS
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+
+[features]
+default = ["kafka"]
+kafka = []
