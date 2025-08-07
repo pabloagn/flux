@@ -98,8 +98,8 @@ class PlantSimulator:
 
                 payload = {
                     "ts": tick_ts,
-                    "unit": int(cell.cell_id[1]),
-                    "stack": cell.cell_id[4],
+                    "unit": int(cell.cell_id.split('_')[0][1:]),
+                    "stack": cell.cell_id.split('_')[1][1:],
                     "cell": int(cell.cell_id[-2:]),
                     "sensor_id": reading["sensor_id"],
                     "status": reading["status"],

@@ -1,7 +1,7 @@
 <br/>
 <p align="center"><img src="assets/FLUX.png" width=500px></p>
 <br/>
-<p align="center"><em>A declarative digital twin engine for electrochemmical processes, written in Rust.</em></p>
+<p align="center"><em>A digital twin engine for electrochemical processes, written in Rust.</em></p>
 
 <br/>
 <div align="center">───────  ⏣  ───────</div>

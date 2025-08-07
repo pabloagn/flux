@@ -19,7 +19,7 @@ pub async fn run_with_retry(brokers: &str, topic: &str, tx: Sender<String>) -> R
         }};
     }
 
-    // ---------- build consumer ------------------------------------------------
+    // --- Build Consumer ---
     let consumer: StreamConsumer = ClientConfig::new()
         .set("bootstrap.servers", brokers)
         .set("group.id", format!("flux-gui-{}", topic))
@@ -27,15 +27,15 @@ pub async fn run_with_retry(brokers: &str, topic: &str, tx: Sender<String>) -> R
         .create()
         .map_err(|e| anyhow!("cannot create consumer: {e}"))?;
 
-    // ---------- subscribe -----------------------------------------------------
+    // --- Subscribe ---
     consumer
         .subscribe(&[topic])
         .map_err(|e| anyhow!("subscribe failed: {e}"))?;
 
-    // OPTIONAL while debugging:
+    // DEBUG
     std::env::set_var("RDKAFKA_LOG_LEVEL", "6");
 
-    // ---------- stream loop ---------------------------------------------------
+    // --- Stream Loop ---
     let mut stream = consumer.stream();
     loop {
         match tokio::time::timeout(Duration::from_secs(1), stream.next()).await {
