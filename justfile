@@ -68,8 +68,11 @@ topics-list:
   @kcat -L -b localhost:9092 | grep -E '^  topic' || true
 
 # Display tail for any Kafka topic
-tail-topic topic="flux.electrical.realtime" count="10":
-  kcat -C -b localhost:9092 -t {{topic}} -o -{{count}} -e -J
+topic-tail topic="flux_electrical_realtime" count="10":
+  @kcat -C -b localhost:9092 -t {{topic}} -o -{{count}} -e -J
+
+topics-listen topic="flux_electrical_realtime":
+  @kafka-console-consumer --bootstrap-server localhost:9092 --topic {{topic}} --from-beginning --max-messages 5 | jq '.'
 
 # ClickHouse ------------------------------------------------------
 
@@ -111,11 +114,11 @@ core-test:
 
 # Build GUI
 gui-build:
-	@cd "{{GUI_DIR}}" && cargo build --release
+	@cd "{{GUI_DIR}}" && cargo build --quiet --release
 
 # Run GUI
 gui-run:
-	@cd "{{GUI_DIR}}" && cargo run --release
+	@cd "{{GUI_DIR}}" && ./target/release/flux-gui
 
 # Pytest suite
 poc-test:

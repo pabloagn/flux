@@ -31,22 +31,23 @@
         pythonBase = pkgs.python311;
 
         systemPackages = with pkgs; [
-          pkg-config
-          openssl
+          btop
+          clickhouse
           cmake
+          dive
+          docker-compose
           gcc
+          git
+          httpie
+          jq
+          kcat
+          confluent-platform # Provides kafka-console-consumer
+          lazydocker
+          openssl
+          pkg-config
           stdenv.cc.cc.lib
           uv
-          clickhouse
-          kcat
-          git
-          jq
           yq-go
-          httpie
-          dive
-          lazydocker
-          docker-compose
-          btop
         ];
 
         # ─────────────── docker-compose file ─────────────

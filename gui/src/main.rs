@@ -4,44 +4,70 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::prelude::*;
-use std::io;
+use std::{io, panic};
 use tokio::{sync::mpsc, time::Duration};
 
 mod app;
 mod bridge;
+mod config;
 mod ui;
+
+// Plant configuration load
+// use crate::config;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // NO LOGGER! It breaks the TUI
-    // env_logger would write to stdout and destroy our terminal UI
+    // NOTE: Set environment to suppress rdkafka logs BEFORE any Kafka initialization
+    // std::env::set_var("RDKAFKA_LOG_LEVEL", "0");
+    // std::env::set_var("RUST_LOG", "error");
 
-    // Setup terminal FIRST before any output
+    // NOTE: Setup terminal FIRST before any output
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Create app
-    let mut app = app::App::new();
+    // --- Add panic hook ---
+    // This ensures that if the app panics, the terminal is restored to a usable state.
+    let original_hook = panic::take_hook();
+    panic::set_hook(Box::new(move |panic_info| {
+        // Restore the terminal
+        let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
 
-    // Setup Kafka consumers for all topics
+        // Call the original panic hook to print the error
+        original_hook(panic_info);
+    }));
+
+    // Load layout
+    let layout = config::config();
+
+    let mut app = app::App::new((*layout).clone());
+
     let (tx, mut rx) = mpsc::channel::<String>(10000);
 
+    // NOTE:
     // These topic names MUST match what your Python simulation is sending to
+    // Eventually topics are ingested from config of course
     let topics = [
-        "flux_electrical_realtime",
-        "flux_process_temperatures",
-        "flux_process_pressures",
+        &layout.topics.voltage,
+        &layout.topics.pressure,
+        &layout.topics.temp_anolyte,
     ];
 
     for topic in topics {
         let tx_clone = tx.clone();
         let topic_owned = topic.to_string();
         tokio::spawn(async move {
-            // Silently handle errors - no printing!
-            let _ = bridge::kafka::run("localhost:9092", &topic_owned, tx_clone).await;
+            loop {
+                // Try to connect, but don't crash on failure
+                let _ =
+                    bridge::kafka::run_with_retry("localhost:9092", &topic_owned, tx_clone.clone())
+                        .await;
+                // Wait before retrying to avoid rapid reconnection attempts
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
         });
     }
 
@@ -63,35 +89,43 @@ async fn main() -> anyhow::Result<()> {
         // Draw UI
         terminal.draw(|f| ui::draw(f, &app))?;
 
-        // Handle input
+        // Handle input - THIS MUST WORK!
         if event::poll(Duration::from_millis(10))? {
             if let Event::Key(key) = event::read()? {
                 match key.code {
+                    // Quit
                     KeyCode::Char('q') | KeyCode::Char('Q') => break,
-                    KeyCode::Tab => app.show_details = !app.show_details,
-                    KeyCode::Up => {
-                        if app.selected_cell > 1 {
-                            app.selected_cell -= 1;
+
+                    // Cycle views
+                    KeyCode::Tab => app.next_view(),
+                    KeyCode::BackTab => app.previous_view(),
+
+                    // Cycle membranes
+                    KeyCode::Up => app.navigate_up(),
+                    KeyCode::Down => app.navigate_down(),
+                    KeyCode::Left => app.navigate_left(),
+                    KeyCode::Right => app.navigate_right(),
+                    // KeyCode::Char('1') => app.selected_unit = 1,
+                    // KeyCode::Char('2') => app.selected_unit = 2,
+                    // KeyCode::Char('3') => app.selected_unit = 3,
+                    KeyCode::Char(c) if c.is_ascii_digit() => {
+                        if let Some(id) = c.to_digit(10).map(|d| d as u8) {
+                            if layout.geometry.units.contains(&id) {
+                                app.selected_unit = id;
+                            }
                         }
                     }
-                    KeyCode::Down => {
-                        if app.selected_cell < 20 {
-                            app.selected_cell += 1;
-                        }
-                    }
-                    KeyCode::Left => match app.selected_stack {
-                        'B' => app.selected_stack = 'A',
-                        'C' => app.selected_stack = 'B',
-                        _ => {}
-                    },
-                    KeyCode::Right => match app.selected_stack {
-                        'A' => app.selected_stack = 'B',
-                        'B' => app.selected_stack = 'C',
-                        _ => {}
-                    },
-                    KeyCode::Char('1') => app.selected_unit = 1,
-                    KeyCode::Char('2') => app.selected_unit = 2,
-                    KeyCode::Char('3') => app.selected_unit = 3,
+
+                    // Pause interface
+                    KeyCode::Char(' ') => app.paused = !app.paused,
+
+                    // Change views
+                    KeyCode::F(1) => app.current_view = app::ViewMode::Overview,
+                    KeyCode::F(2) => app.current_view = app::ViewMode::Performance,
+                    KeyCode::F(3) => app.current_view = app::ViewMode::Predictive,
+                    KeyCode::F(4) => app.current_view = app::ViewMode::Economics,
+                    KeyCode::F(5) => app.current_view = app::ViewMode::Maintenance,
+                    KeyCode::F(6) => app.current_view = app::ViewMode::Alarms,
                     _ => {}
                 }
             }

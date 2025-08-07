@@ -1,0 +1,31 @@
+{
+  "geometry": {
+    "units": [1, 2, 3, 4],
+    "stacks": ["A", "B", "C", "D", "E", "F"],
+    "cells_per_stack": 20,
+    "membrane_area_m2": 2.7
+  },
+
+  "sampling": {
+    "electrical_hz": 1,
+    "pressure_hz": 1,
+    "temperature_hz": 0.1
+  },
+
+  "noise": {
+    "voltage_frac": 0.005,
+    "current_frac": 0.003,
+    "pressure_abs": 2.0,
+    "temperature_abs": 0.5
+  },
+
+  "topics": {
+    "voltage": "flux_electrical_realtime",
+    "current": "flux_electrical_realtime",
+    "pressure": "flux_process_pressures",
+    "temp_anolyte": "flux_process_temperatures",
+    "temp_catholyte": "flux_process_temperatures"
+  },
+
+  "default_run_s": 60
+}

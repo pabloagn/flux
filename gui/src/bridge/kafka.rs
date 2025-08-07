@@ -1,38 +1,62 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Result};
 use rdkafka::{
     config::ClientConfig,
     consumer::{Consumer, StreamConsumer},
     message::Message,
 };
+use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::StreamExt;
 
-pub async fn run(brokers: &str, topic: &str, tx: Sender<String>) -> Result<()> {
+/// Consume `topic` and push every UTF-8 payload onto `tx`.
+/// On any hard error we log it once and return Ok(()) so the
+/// calling task’s retry-loop can spin again after 5 s.
+pub async fn run_with_retry(brokers: &str, topic: &str, tx: Sender<String>) -> Result<()> {
+    macro_rules! bail {
+        ($($arg:tt)*) => {{
+            eprintln!("[KAFKA] {}", format!($($arg)*));
+            return Ok(());
+        }};
+    }
+
+    // ---------- build consumer ------------------------------------------------
     let consumer: StreamConsumer = ClientConfig::new()
         .set("bootstrap.servers", brokers)
         .set("group.id", format!("flux-gui-{}", topic))
-        .set("enable.partition.eof", "false")
-        .set("auto.offset.reset", "latest")
-        .set("enable.auto.commit", "true")
-        .set("session.timeout.ms", "6000")
+        .set("auto.offset.reset", "latest") // start at the live tail
         .create()
-        .context("Failed to create Kafka consumer")?;
+        .map_err(|e| anyhow!("cannot create consumer: {e}"))?;
 
+    // ---------- subscribe -----------------------------------------------------
     consumer
         .subscribe(&[topic])
-        .context("Failed to subscribe")?;
+        .map_err(|e| anyhow!("subscribe failed: {e}"))?;
 
+    // OPTIONAL while debugging:
+    std::env::set_var("RDKAFKA_LOG_LEVEL", "6");
+
+    // ---------- stream loop ---------------------------------------------------
     let mut stream = consumer.stream();
-
-    while let Some(result) = stream.next().await {
-        if let Ok(msg) = result {
-            if let Some(Ok(payload)) = msg.payload_view::<str>() {
-                if tx.send(payload.to_owned()).await.is_err() {
-                    break; // Channel closed, exit silently
+    loop {
+        match tokio::time::timeout(Duration::from_secs(1), stream.next()).await {
+            Ok(Some(Ok(msg))) => {
+                if let Some(Ok(text)) = msg.payload_view::<str>() {
+                    if tx.send(text.to_owned()).await.is_err() {
+                        bail!("channel closed");
+                    }
+                } else if let Some(payload) = msg.payload() {
+                    // Fallback if the payload wasn’t valid UTF-8 (rare, but log it)
+                    eprintln!("[KAFKA] non-utf8 payload ({} bytes)", payload.len());
                 }
             }
+            Ok(Some(Err(e))) => bail!("message error: {e}"),
+            Ok(None) => bail!("stream ended"),
+            Err(_) => { /* 1 s idle → keep polling */ }
         }
     }
+}
 
-    Ok(())
+// Keep the old public symbol alive for anything else that calls it
+pub async fn run(b: &str, t: &str, tx: Sender<String>) -> Result<()> {
+    run_with_retry(b, t, tx).await
 }

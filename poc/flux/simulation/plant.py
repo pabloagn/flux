@@ -119,9 +119,9 @@ class PlantSimulator:
 
             await asyncio.sleep(dt)
 
-        log.info("Loop %ds finished (%,d msgs)", dt, total_msgs)
+        log.info("Loop %ds finished (%d msgs)", dt, total_msgs)
 
-    # ---------------------------------------------------------------- API
+    # --- Api ---
     async def run(self):
         with task_progress("running plant simulation"):
             tasks = [

@@ -1,3 +1,4 @@
+use crate::config::PlantLayout;
 use chrono::{DateTime, Local};
 use serde::Deserialize;
 use std::collections::{HashMap, VecDeque};
@@ -6,44 +7,43 @@ use std::collections::{HashMap, VecDeque};
 pub struct SensorMessage {
     pub ts: String,
     pub unit: u8,
-    pub stack: char,
+    pub stack: String,
     pub cell: u8,
     #[serde(default)]
     pub sensor_id: Option<String>,
-    #[serde(default, rename = "voltage_V")]
-    pub voltage_v: Option<f64>,
-    #[serde(default, rename = "current_A")]
-    pub current_a: Option<f64>,
-    #[serde(default, rename = "temperature_C")]
-    pub temperature_c: Option<f64>,
-    #[serde(default, rename = "pressure_mbar")]
-    pub pressure_mbar: Option<f64>,
     #[serde(default)]
     pub status: Option<String>,
     #[serde(default)]
     pub quality: Option<f64>,
+    #[serde(default)]
+    pub voltage_V: Option<f64>,
+    #[serde(default)]
+    pub current_A: Option<f64>,
+    #[serde(default)]
+    pub temperature_C: Option<f64>,
+    #[serde(default)]
+    pub pressure_mbar: Option<f64>,
 }
 
 #[derive(Clone)]
 pub struct CellData {
-    // REAL DATA from Kafka
+    // Data from Kafka
     pub voltage: f64,
     pub current: f64,
     pub temperature: f64,
     pub pressure: f64,
 
-    // CALCULATED from real data
+    // Calculated from real data
     pub efficiency: f64,      // Calculated from voltage/current/temp
     pub power_kw: f64,        // V * I / 1000
     pub specific_energy: f64, // kWh/kg Cl2
     pub production_rate: f64, // kg/h Cl2
 
-    // History for trends (REAL)
+    // Real history for trends
     pub voltage_history: VecDeque<f64>,
     pub temp_history: VecDeque<f64>,
     pub efficiency_history: VecDeque<f64>,
 
-    // TODO: HARDCODED predictions (until we have digital twins)
     pub predicted_lifetime_days: i32,
     pub degradation_rate: f64,
 
@@ -251,12 +251,16 @@ pub enum AlarmSeverity {
 }
 
 pub struct App {
+    /* shared json config */
+    pub cfg: PlantLayout,
+
+    /* realtime state */
     pub cells: HashMap<String, CellData>,
     pub metrics: PlantMetrics,
     pub alarms: VecDeque<Alarm>,
     pub message_history: VecDeque<SensorMessage>,
 
-    // UI state
+    /* ui state */
     pub current_view: ViewMode,
     pub selected_unit: u8,
     pub selected_stack: char,
@@ -264,7 +268,7 @@ pub struct App {
     pub show_details: bool,
     pub paused: bool,
 
-    // Stats
+    /* perf stats */
     pub messages_per_second: usize,
     pub total_messages: usize,
     pub last_message_count: usize,
@@ -272,18 +276,27 @@ pub struct App {
 }
 
 impl App {
-    pub fn new() -> Self {
+    pub fn new(cfg: PlantLayout) -> Self {
+        let first_unit = cfg.geometry.units[0];
+        let first_stack = cfg.geometry.stacks[0];
+
         Self {
+            cfg,
+            /* dynamic capacity */
             cells: HashMap::new(),
             metrics: PlantMetrics::calculate_from_cells(&HashMap::new()),
             alarms: VecDeque::with_capacity(100),
             message_history: VecDeque::with_capacity(1000),
+
+            /* ui */
             current_view: ViewMode::Overview,
-            selected_unit: 1,
-            selected_stack: 'A',
+            selected_unit: first_unit,
+            selected_stack: first_stack,
             selected_cell: 1,
             show_details: false,
             paused: false,
+
+            /* stats */
             messages_per_second: 0,
             total_messages: 0,
             last_message_count: 0,
@@ -299,65 +312,72 @@ impl App {
         self.total_messages += 1;
 
         if let Ok(msg) = serde_json::from_str::<SensorMessage>(json_str) {
-            let cell_key = format!("U{}_S{}_C{:02}", msg.unit, msg.stack, msg.cell);
+            // Convert stack String to char
+            let stack_char = msg.stack.chars().next().unwrap_or('A');
+            let cell_key = format!("U{}_S{}_C{:02}", msg.unit, stack_char, msg.cell);
 
-            let cell = self
-                .cells
-                .entry(cell_key.clone())
-                .or_insert_with(CellData::default);
+            // Rest of the code remains the same...
+            let mut alarms_to_add = Vec::new();
 
-            // Update REAL data
-            if let Some(v) = msg.voltage_v {
-                cell.voltage = v;
-                cell.voltage_history.push_back(v);
-                if cell.voltage_history.len() > 300 {
-                    cell.voltage_history.pop_front();
+            {
+                let cell = self
+                    .cells
+                    .entry(cell_key.clone())
+                    .or_insert_with(CellData::default);
+
+                if let Some(v) = msg.voltage_V {
+                    cell.voltage = v;
+                    cell.voltage_history.push_back(v);
+                    if cell.voltage_history.len() > 300 {
+                        cell.voltage_history.pop_front();
+                    }
+
+                    if v > 3.5 {
+                        alarms_to_add.push((AlarmSeverity::Critical, "Voltage", v, 3.5));
+                    } else if v > 3.3 {
+                        alarms_to_add.push((AlarmSeverity::Warning, "Voltage", v, 3.3));
+                    }
                 }
 
-                // Check for alarms
-                if v > 3.5 {
-                    self.add_alarm(AlarmSeverity::Critical, &cell_key, "Voltage", v, 3.5);
-                } else if v > 3.3 {
-                    self.add_alarm(AlarmSeverity::Warning, &cell_key, "Voltage", v, 3.3);
-                }
-            }
-
-            if let Some(i) = msg.current_a {
-                cell.current = i;
-            }
-
-            if let Some(t) = msg.temperature_c {
-                cell.temperature = t;
-                cell.temp_history.push_back(t);
-                if cell.temp_history.len() > 300 {
-                    cell.temp_history.pop_front();
+                if let Some(i) = msg.current_A {
+                    cell.current = i;
                 }
 
-                if t > 95.0 {
-                    self.add_alarm(AlarmSeverity::Critical, &cell_key, "Temperature", t, 95.0);
-                } else if t > 90.0 {
-                    self.add_alarm(AlarmSeverity::Warning, &cell_key, "Temperature", t, 90.0);
+                if let Some(t) = msg.temperature_C {
+                    cell.temperature = t;
+                    cell.temp_history.push_back(t);
+                    if cell.temp_history.len() > 300 {
+                        cell.temp_history.pop_front();
+                    }
+
+                    if t > 95.0 {
+                        alarms_to_add.push((AlarmSeverity::Critical, "Temperature", t, 95.0));
+                    } else if t > 90.0 {
+                        alarms_to_add.push((AlarmSeverity::Warning, "Temperature", t, 90.0));
+                    }
                 }
-            }
 
-            if let Some(p) = msg.pressure_mbar {
-                cell.pressure = p;
+                if let Some(p) = msg.pressure_mbar {
+                    cell.pressure = p;
 
-                if p > 300.0 {
-                    self.add_alarm(AlarmSeverity::Warning, &cell_key, "Pressure", p, 300.0);
+                    if p > 300.0 {
+                        alarms_to_add.push((AlarmSeverity::Warning, "Pressure", p, 300.0));
+                    }
                 }
+
+                cell.update_calculations();
+                cell.efficiency_history.push_back(cell.efficiency);
+                if cell.efficiency_history.len() > 300 {
+                    cell.efficiency_history.pop_front();
+                }
+
+                cell.last_update = Local::now();
             }
 
-            // Calculate derived metrics from real data
-            cell.update_calculations();
-            cell.efficiency_history.push_back(cell.efficiency);
-            if cell.efficiency_history.len() > 300 {
-                cell.efficiency_history.pop_front();
+            for (severity, parameter, value, threshold) in alarms_to_add {
+                self.add_alarm(severity, &cell_key, parameter, value, threshold);
             }
 
-            cell.last_update = Local::now();
-
-            // Store message
             self.message_history.push_back(msg);
             if self.message_history.len() > 1000 {
                 self.message_history.pop_front();
@@ -401,9 +421,10 @@ impl App {
 
     pub fn on_tick(&mut self) {
         self.tick_count += 1;
+        self.calculate_advanced_metrics();
         if self.tick_count % 20 == 0 {
             let current = self.total_messages;
-            self.messages_per_second = (current - self.last_message_count) * 20;
+            self.messages_per_second = current - self.last_message_count;
             self.last_message_count = current;
         }
     }
@@ -438,33 +459,53 @@ impl App {
     }
 
     pub fn navigate_down(&mut self) {
-        if self.selected_cell < 20 {
+        if self.selected_cell < self.cfg.geometry.cells_per_stack {
             self.selected_cell += 1;
         }
     }
 
     pub fn navigate_left(&mut self) {
-        match self.selected_stack {
-            'B' => self.selected_stack = 'A',
-            'C' => self.selected_stack = 'B',
-            _ => {
-                if self.selected_unit > 1 {
-                    self.selected_unit -= 1;
-                    self.selected_stack = 'C';
-                }
+        let stacks = &self.cfg.geometry.stacks;
+        if let Some(idx) = stacks.iter().position(|&s| s == self.selected_stack) {
+            if idx > 0 {
+                self.selected_stack = stacks[idx - 1];
+                return;
+            }
+        }
+        // wrap to previous unit
+        if let Some(pos) = self
+            .cfg
+            .geometry
+            .units
+            .iter()
+            .position(|&u| u == self.selected_unit)
+        {
+            if pos > 0 {
+                self.selected_unit = self.cfg.geometry.units[pos - 1];
+                self.selected_stack = *stacks.last().unwrap();
             }
         }
     }
 
     pub fn navigate_right(&mut self) {
-        match self.selected_stack {
-            'A' => self.selected_stack = 'B',
-            'B' => self.selected_stack = 'C',
-            _ => {
-                if self.selected_unit < 3 {
-                    self.selected_unit += 1;
-                    self.selected_stack = 'A';
-                }
+        let stacks = &self.cfg.geometry.stacks;
+        if let Some(idx) = stacks.iter().position(|&s| s == self.selected_stack) {
+            if idx + 1 < stacks.len() {
+                self.selected_stack = stacks[idx + 1];
+                return;
+            }
+        }
+        // wrap to next unit
+        if let Some(pos) = self
+            .cfg
+            .geometry
+            .units
+            .iter()
+            .position(|&u| u == self.selected_unit)
+        {
+            if pos + 1 < self.cfg.geometry.units.len() {
+                self.selected_unit = self.cfg.geometry.units[pos + 1];
+                self.selected_stack = stacks[0];
             }
         }
     }
