@@ -1,0 +1,17 @@
+{
+  "chlorine": {
+    "molecular_weight_g_mol": 70.9,
+    "density_kg_m3": 3.2,
+    "boiling_point_c": -34.04
+  },
+  "sodium_hydroxide": {
+    "molecular_weight_g_mol": 39.997,
+    "density_kg_m3": 2130.0,
+    "boiling_point_c": 1388.0
+  },
+  "hydrogen": {
+    "molecular_weight_g_mol": 2.016,
+    "density_kg_m3": 0.08988,
+    "boiling_point_c": -252.87
+  }
+}

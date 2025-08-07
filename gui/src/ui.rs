@@ -70,7 +70,7 @@ fn render_overview(f: &mut Frame, area: Rect, app: &mut App) {
 
     let overview_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(3)]) // Space for main grid + scrollbar
+        .constraints([Constraint::Min(0), Constraint::Length(3)])
         .split(chunks[0]);
 
     render_main_grid(f, overview_chunks[0], app);
@@ -90,19 +90,19 @@ fn render_main_grid(f: &mut Frame, area: Rect, app: &mut App) {
         horizontal: 1,
     });
 
-    let unit_width = (app.cfg.geometry.stacks.len() * 3) + 3; // 3 chars per stack + 1 for scrollbar + 2 for padding
-    let units_that_fit = (inner_area.width as usize) / unit_width;
-    let total_units = app.cfg.geometry.units.len();
+    let unit_width = (app.cfg.plant.geometry.stacks.len() * 3) + 3;
+    let units_that_fit = (inner_area.width as usize).saturating_sub(1) / unit_width;
+    let total_units = app.cfg.plant.geometry.units.len();
 
     let selected_unit_idx = app
         .cfg
+        .plant
         .geometry
         .units
         .iter()
         .position(|&u| u == app.selected_unit)
         .unwrap_or(0);
 
-    // Auto-scroll logic for horizontal view
     if selected_unit_idx < app.unit_scroll_offset {
         app.unit_scroll_offset = selected_unit_idx;
     }
@@ -115,6 +115,7 @@ fn render_main_grid(f: &mut Frame, area: Rect, app: &mut App) {
 
     let visible_units = app
         .cfg
+        .plant
         .geometry
         .units
         .iter()
@@ -122,9 +123,10 @@ fn render_main_grid(f: &mut Frame, area: Rect, app: &mut App) {
         .take(units_that_fit)
         .copied()
         .collect::<Vec<_>>();
-    let constraints = std::iter::repeat(Constraint::Length(unit_width as u16))
+    let mut constraints = std::iter::repeat(Constraint::Length(unit_width as u16))
         .take(visible_units.len())
         .collect::<Vec<_>>();
+    constraints.push(Constraint::Min(0));
 
     let unit_chunks = Layout::default()
         .direction(Direction::Horizontal)
@@ -132,55 +134,83 @@ fn render_main_grid(f: &mut Frame, area: Rect, app: &mut App) {
         .split(inner_area);
 
     for (i, unit_id) in visible_units.iter().enumerate() {
-        // Pass app as mutable because each unit display now updates its own scroll state
         render_unit_display(f, unit_chunks[i], app, *unit_id);
     }
 }
 
 fn render_unit_display(f: &mut Frame, area: Rect, app: &mut App, unit_id: u8) {
     let is_active_unit = app.selected_unit == unit_id;
-    let border_style = if is_active_unit { Style::new().fg(Color::Yellow) } else { Style::new().fg(Color::DarkGray) };
+    let border_style = if is_active_unit {
+        Style::new().fg(Color::Yellow)
+    } else {
+        Style::new().fg(Color::DarkGray)
+    };
 
-    let block = Block::default().title(format!(" Unit {} ", unit_id)).borders(Borders::ALL).border_style(border_style);
+    let block = Block::default()
+        .title(format!(" Unit {} ", unit_id))
+        .borders(Borders::ALL)
+        .border_style(border_style);
     f.render_widget(block, area);
-    let inner = area.inner(&Margin { vertical: 1, horizontal: 1 });
+    let inner = area.inner(&Margin {
+        vertical: 1,
+        horizontal: 1,
+    });
 
-    let content_area = Layout::default().direction(Direction::Horizontal)
-        .constraints([Constraint::Min(0), Constraint::Length(1)]) // Area for stacks, 1 char for scrollbar
+    let content_area = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
         .split(inner);
-    
+
     let stacks_area = content_area[0];
     let scrollbar_area = content_area[1];
 
-    let stack_chunks = Layout::default().direction(Direction::Horizontal)
-        .constraints(std::iter::repeat(Constraint::Length(3)).take(app.cfg.geometry.stacks.len()).collect::<Vec<_>>())
+    let stack_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(
+            std::iter::repeat(Constraint::Length(3))
+                .take(app.cfg.plant.geometry.stacks.len())
+                .collect::<Vec<_>>(),
+        )
         .split(stacks_area);
 
     let scroll_offset = app.cell_scroll_offsets.entry(unit_id).or_default();
-    let visible_height = stacks_area.height.saturating_sub(1) as u8; // -1 for header
+    let visible_height = stacks_area.height.saturating_sub(1) as u8;
 
-    // Auto-scroll the active unit to keep the selection in view
     if is_active_unit {
-        if app.selected_cell < *scroll_offset + 1 { *scroll_offset = app.selected_cell.saturating_sub(1); }
-        if app.selected_cell > *scroll_offset + visible_height { *scroll_offset = app.selected_cell.saturating_sub(visible_height); }
+        if app.selected_cell < *scroll_offset + 1 {
+            *scroll_offset = app.selected_cell.saturating_sub(1);
+        }
+        if app.selected_cell > *scroll_offset + visible_height {
+            *scroll_offset = app.selected_cell.saturating_sub(visible_height);
+        }
     }
 
-    for (i, &stack_id) in app.cfg.geometry.stacks.iter().enumerate() {
-        let mut lines = vec![Line::from(Span::styled(stack_id.to_string(), Style::new().fg(Color::Cyan).bold())).alignment(Alignment::Center)];
-        
+    for (i, &stack_id) in app.cfg.plant.geometry.stacks.iter().enumerate() {
+        let mut lines = vec![Line::from(Span::styled(
+            stack_id.to_string(),
+            Style::new().fg(Color::Cyan).bold(),
+        ))
+        .alignment(Alignment::Center)];
+
         for row in 0..visible_height {
             let cell_id = *scroll_offset + 1 + row;
-            if cell_id > app.cfg.geometry.cells_per_stack { break; }
+            if cell_id > app.cfg.plant.geometry.cells_per_stack {
+                break;
+            }
 
             let key = format!("U{unit_id}_S{stack_id}_C{cell_id:02}");
             let (glyph, color) = match app.cells.get(&key) {
                 Some(cd) => get_cell_display(cd),
                 None => ('·', Color::DarkGray),
             };
-            
-            let is_cell_selected = is_active_unit && app.selected_stack == stack_id && app.selected_cell == cell_id;
+
+            let is_cell_selected =
+                is_active_unit && app.selected_stack == stack_id && app.selected_cell == cell_id;
             let (text, style) = if is_cell_selected {
-                (format!("[{}]", glyph), Style::new().fg(color).add_modifier(Modifier::BOLD))
+                (
+                    format!("[{}]", glyph),
+                    Style::new().fg(color).add_modifier(Modifier::BOLD),
+                )
             } else {
                 (format!(" {} ", glyph), Style::new().fg(color))
             };
@@ -188,13 +218,13 @@ fn render_unit_display(f: &mut Frame, area: Rect, app: &mut App, unit_id: u8) {
         }
         f.render_widget(Paragraph::new(lines), stack_chunks[i]);
     }
-    
-    // --- FIX: Render the toned-down scrollbar in its dedicated area ---
-    let mut scrollbar_state = ScrollbarState::new(app.cfg.geometry.cells_per_stack as usize).position(*scroll_offset as usize);
+
+    let mut scrollbar_state = ScrollbarState::new(app.cfg.plant.geometry.cells_per_stack as usize)
+        .position(*scroll_offset as usize);
     f.render_stateful_widget(
-        Scrollbar::new(ScrollbarOrientation::VerticalRight).style(Style::new().fg(Color::DarkGray)), 
-        scrollbar_area, 
-        &mut scrollbar_state
+        Scrollbar::new(ScrollbarOrientation::VerticalRight).style(Style::new().fg(Color::DarkGray)),
+        scrollbar_area,
+        &mut scrollbar_state,
     );
 }
 
@@ -209,11 +239,15 @@ fn render_horizontal_scrollbar(f: &mut Frame, area: Rect, app: &App) {
         horizontal: 1,
     });
 
-    let unit_width = (app.cfg.geometry.stacks.len() * 3) + 2;
-    let units_that_fit = (f.size().width as usize).saturating_sub(35) / unit_width;
+    let unit_width = (app.cfg.plant.geometry.stacks.len() * 3) + 3;
+    let units_that_fit = (f.size().width as usize)
+        .saturating_sub(35)
+        .saturating_sub(2)
+        / unit_width;
 
     let spans: Vec<Span> = app
         .cfg
+        .plant
         .geometry
         .units
         .iter()
@@ -222,13 +256,13 @@ fn render_horizontal_scrollbar(f: &mut Frame, area: Rect, app: &App) {
             let is_in_view =
                 i >= app.unit_scroll_offset && i < app.unit_scroll_offset + units_that_fit;
             let mut has_alert = false;
-            for stack_id in &app.cfg.geometry.stacks {
-                for cell_id in 1..=app.cfg.geometry.cells_per_stack {
+            for stack_id in &app.cfg.plant.geometry.stacks {
+                for cell_id in 1..=app.cfg.plant.geometry.cells_per_stack {
                     if let Some(cell) = app
                         .cells
                         .get(&format!("U{unit_id}_S{stack_id}_C{cell_id:02}"))
                     {
-                        if cell.voltage > 3.3 {
+                        if cell.voltage > app.cfg.limits.warning.voltage_v {
                             has_alert = true;
                             break;
                         }
@@ -300,11 +334,11 @@ fn render_selection_details(f: &mut Frame, area: Rect, app: &App) {
         .title(format!(" Details: {} ", app.get_selected_cell_key()))
         .borders(Borders::ALL)
         .border_style(Style::new().fg(Color::Yellow));
-    f.render_widget(block, area);
     let inner = area.inner(&Margin {
         vertical: 0,
         horizontal: 1,
     });
+    f.render_widget(block, area);
     let text = if let Some(cell) = app.get_selected_cell_data() {
         let (glyph, color) = get_cell_display(cell);
         vec![
@@ -439,7 +473,6 @@ fn render_economics(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(table, inner_area);
 }
 
-// This function now exists just to show gauges.
 fn render_performance(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .title(" Real-Time Performance Metrics ")

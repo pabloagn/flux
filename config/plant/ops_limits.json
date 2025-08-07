@@ -1,0 +1,10 @@
+{
+  "warning": {
+    "voltage_v": 3.3,
+    "temperature_c": 90.0
+  },
+  "critical": {
+    "voltage_v": 3.5,
+    "temperature_c": 95.0
+  }
+}

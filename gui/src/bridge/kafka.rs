@@ -8,9 +8,6 @@ use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::StreamExt;
 
-/// Consume `topic` and push every UTF-8 payload onto `tx`.
-/// On any hard error we log it once and return Ok(()) so the
-/// calling task’s retry-loop can spin again after 5 s.
 pub async fn run_with_retry(brokers: &str, topic: &str, tx: Sender<String>) -> Result<()> {
     macro_rules! bail {
         ($($arg:tt)*) => {{

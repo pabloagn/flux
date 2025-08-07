@@ -86,7 +86,7 @@ def _layout_path() -> Path:
             Path(__file__).resolve().parents[3]
             / "config"
             / "plant"
-            / "plant_layout.json"
+            / "plant.json"
         )
 
     if not p.is_file():

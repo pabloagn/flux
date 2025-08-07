@@ -1,8 +1,9 @@
-use crate::config::PlantLayout;
+use crate::config::{DefaultsConfig, FluxConfig};
 use chrono::{DateTime, Local};
 use crossterm::event::KeyCode;
 use serde::Deserialize;
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SensorMessage {
@@ -42,26 +43,24 @@ pub struct CellData {
     pub last_update: DateTime<Local>,
 }
 
-impl Default for CellData {
-    fn default() -> Self {
+impl CellData {
+    pub fn new(defaults: &DefaultsConfig) -> Self {
         Self {
-            voltage: 3.0,
-            current: 5000.0,
-            temperature: 85.0,
-            pressure: 150.0,
-            efficiency: 94.0,
-            power_kw: 15.0,
-            specific_energy: 2450.0,
-            production_rate: 6.62,
+            voltage: defaults.cell_state.voltage_v,
+            current: defaults.cell_state.current_a,
+            temperature: defaults.cell_state.temperature_c,
+            pressure: defaults.cell_state.pressure_mbar,
+            efficiency: defaults.cell_state.efficiency_percent,
+            power_kw: (defaults.cell_state.voltage_v * defaults.cell_state.current_a) / 1000.0,
+            specific_energy: 0.0,
+            production_rate: 0.0,
             voltage_history: VecDeque::with_capacity(300),
             temp_history: VecDeque::with_capacity(300),
             efficiency_history: VecDeque::with_capacity(300),
             last_update: Local::now(),
         }
     }
-}
 
-impl CellData {
     pub fn update_calculations(&mut self) {
         let current_density = self.current / 2.7;
         self.efficiency =
@@ -103,25 +102,36 @@ pub struct PlantMetrics {
 }
 
 impl PlantMetrics {
-    pub fn calculate_from_cells(cells: &HashMap<String, CellData>) -> Self {
+    pub fn calculate_from_cells(cells: &HashMap<String, CellData>, config: &FluxConfig) -> Self {
         if cells.is_empty() {
             return Self::default();
         }
+
         let mut metrics = Self::default();
+        let limits = &config.limits;
+
         for cell in cells.values() {
             metrics.total_power_mw += cell.power_kw / 1000.0;
             metrics.avg_efficiency += cell.efficiency;
             metrics.total_production_cl2 += cell.production_rate;
-            if cell.voltage > 3.5 || cell.temperature > 95.0 {
+
+            if cell.voltage > limits.critical.voltage_v
+                || cell.temperature > limits.critical.temperature_c
+            {
                 metrics.cells_critical += 1;
-            } else if cell.voltage > 3.3 || cell.temperature > 90.0 {
+            } else if cell.voltage > limits.warning.voltage_v
+                || cell.temperature > limits.warning.temperature_c
+            {
                 metrics.cells_warning += 1;
             } else {
                 metrics.cells_online += 1;
             }
         }
+
         let cell_count = cells.len() as f64;
-        metrics.avg_efficiency /= cell_count;
+        if cell_count > 0.0 {
+            metrics.avg_efficiency /= cell_count;
+        }
         metrics.total_production_cl2 = metrics.total_production_cl2 * 24.0 / 1000.0;
         metrics.total_production_naoh = metrics.total_production_cl2 * (80.0 / 71.0);
         metrics.total_production_h2 = metrics.total_production_cl2 * (2.0 / 71.0);
@@ -129,23 +139,26 @@ impl PlantMetrics {
             metrics.specific_energy_avg =
                 (metrics.total_power_mw * 1000.0 * 24.0) / metrics.total_production_cl2;
         }
-        let (electricity_price, chlorine_price, caustic_price, hydrogen_price) =
-            (50.0, 250.0, 420.0, 2000.0);
-        metrics.hourly_energy_cost = metrics.total_power_mw * electricity_price;
-        metrics.hourly_revenue = (metrics.total_production_cl2 / 24.0) * chlorine_price
-            + (metrics.total_production_naoh / 24.0) * caustic_price
-            + (metrics.total_production_h2 / 24.0) * hydrogen_price;
+
+        let financials = &config.financials;
+        metrics.hourly_energy_cost = metrics.total_power_mw * financials.electricity_price_per_mwh;
+        metrics.hourly_revenue = (metrics.total_production_cl2 / 24.0)
+            * financials.chlorine_price_per_mt
+            + (metrics.total_production_naoh / 24.0) * financials.naoh_price_per_mt
+            + (metrics.total_production_h2 / 24.0) * financials.hydrogen_price_per_mt;
+
         if metrics.hourly_revenue > 0.0 {
             metrics.gross_margin = (metrics.hourly_revenue - metrics.hourly_energy_cost)
                 / metrics.hourly_revenue
                 * 100.0;
         }
+
         metrics
     }
 }
 
 pub struct App {
-    pub cfg: PlantLayout,
+    pub cfg: Arc<FluxConfig>,
     pub cells: HashMap<String, CellData>,
     pub metrics: PlantMetrics,
     pub current_view: ViewMode,
@@ -162,10 +175,10 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(cfg: PlantLayout) -> Self {
+    pub fn new(cfg: Arc<FluxConfig>) -> Self {
         Self {
-            selected_unit: cfg.geometry.units[0],
-            selected_stack: cfg.geometry.stacks[0],
+            selected_unit: cfg.plant.geometry.units[0],
+            selected_stack: cfg.plant.geometry.stacks[0],
             cfg,
             cells: HashMap::new(),
             metrics: PlantMetrics::default(),
@@ -173,7 +186,7 @@ impl App {
             selected_cell: 1,
             paused: false,
             unit_scroll_offset: 0,
-            cell_scroll_offsets: HashMap::new(), // Initialize the HashMap
+            cell_scroll_offsets: HashMap::new(),
             messages_per_second: 0,
             total_messages: 0,
             last_message_count: 0,
@@ -196,7 +209,7 @@ impl App {
                 KeyCode::Left => self.navigate_left(),
                 KeyCode::Right => self.navigate_right(),
                 KeyCode::PageDown => {
-                    let max_cells = self.cfg.geometry.cells_per_stack;
+                    let max_cells = self.cfg.plant.geometry.cells_per_stack;
                     self.selected_cell = (self.selected_cell + 5).min(max_cells);
                 }
                 KeyCode::PageUp => {
@@ -218,7 +231,7 @@ impl App {
     pub fn on_tick(&mut self) {
         self.tick_count += 1;
         if !self.paused {
-            self.metrics = PlantMetrics::calculate_from_cells(&self.cells);
+            self.metrics = PlantMetrics::calculate_from_cells(&self.cells, &self.cfg);
         }
         if self.tick_count % 20 == 0 {
             self.messages_per_second = self.total_messages - self.last_message_count;
@@ -234,7 +247,12 @@ impl App {
             self.total_messages += 1;
             let stack_char = msg.stack.chars().next().unwrap_or('?');
             let key = format!("U{}_S{}_C{:02}", msg.unit, stack_char, msg.cell);
-            let cell = self.cells.entry(key).or_insert_with(CellData::default);
+
+            let cell = self
+                .cells
+                .entry(key)
+                .or_insert_with(|| CellData::new(&self.cfg.defaults));
+
             if let Some(v) = msg.voltage_V {
                 cell.voltage = v;
                 cell.voltage_history.push_back(v);
@@ -295,25 +313,26 @@ impl App {
     }
 
     pub fn navigate_down(&mut self) {
-        if self.selected_cell < self.cfg.geometry.cells_per_stack {
+        if self.selected_cell < self.cfg.plant.geometry.cells_per_stack {
             self.selected_cell += 1;
         }
     }
 
     pub fn navigate_left(&mut self) {
-        let stacks = &self.cfg.geometry.stacks;
+        let stacks = &self.cfg.plant.geometry.stacks;
         if let Some(idx) = stacks.iter().position(|&s| s == self.selected_stack) {
             if idx > 0 {
                 self.selected_stack = stacks[idx - 1];
             } else if let Some(unit_idx) = self
                 .cfg
+                .plant
                 .geometry
                 .units
                 .iter()
                 .position(|&u| u == self.selected_unit)
             {
                 if unit_idx > 0 {
-                    self.selected_unit = self.cfg.geometry.units[unit_idx - 1];
+                    self.selected_unit = self.cfg.plant.geometry.units[unit_idx - 1];
                     self.selected_stack = *stacks.last().unwrap();
                 }
             }
@@ -321,19 +340,20 @@ impl App {
     }
 
     pub fn navigate_right(&mut self) {
-        let stacks = &self.cfg.geometry.stacks;
+        let stacks = &self.cfg.plant.geometry.stacks;
         if let Some(idx) = stacks.iter().position(|&s| s == self.selected_stack) {
             if idx + 1 < stacks.len() {
                 self.selected_stack = stacks[idx + 1];
             } else if let Some(unit_idx) = self
                 .cfg
+                .plant
                 .geometry
                 .units
                 .iter()
                 .position(|&u| u == self.selected_unit)
             {
-                if unit_idx + 1 < self.cfg.geometry.units.len() {
-                    self.selected_unit = self.cfg.geometry.units[unit_idx + 1];
+                if unit_idx + 1 < self.cfg.plant.geometry.units.len() {
+                    self.selected_unit = self.cfg.plant.geometry.units[unit_idx + 1];
                     self.selected_stack = stacks[0];
                 }
             }
