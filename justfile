@@ -146,28 +146,3 @@ operator-tui-build:
 # Run Operator TUI
 operator-tui-run:
 	@cd "{{OPERATOR_TUI_DIR}}" && ./target/release/flux-gui
-
-# Pytest suite
-poc-test:
-	@cd "{{POC_DIR}}" && pytest -q
-
-# Lint / format ---------------------------------------------------
-# Lint code using ruff
-lint:
-	@ruff check "{{POC_DIR}}/flux" "{{SCRIPTS_DIR}}" --fix
-
-# Format code using ruff
-format:
-	@ruff format "{{POC_DIR}}/flux" "{{SCRIPTS_DIR}}"
-	@cd "{{CORE_DIR}}" && cargo fmt
-	@cd "{{GUI_DIR}}"  && cargo fmt
-
-# Clean-ups -------------------------------------------------------
-# Clean docker images
-docker-clean:
-	@docker system prune -f
-
-# Clean rust targets
-target-clean:
-	@rm -rf "{{CORE_DIR}}/target" "{{GUI_DIR}}/target"
-

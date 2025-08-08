@@ -1,0 +1,16 @@
+# Code Owners
+# Safety-critical components require 2 reviewers
+/services/safety-interlock/ @safety-team @lead-engineer
+/services/control-system/ @control-team @lead-engineer
+/lib/flux-safety/ @safety-team
+/config/safety/ @safety-team @operations
+
+# Security components
+/services/audit-logger/ @security-team
+/certs/ @security-team @devops
+/config/security/ @security-team
+
+# Core infrastructure
+/infra/ @devops @platform-team
+*.rs @rust-team
+*.py @python-team
