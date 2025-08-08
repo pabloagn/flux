@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flux-sim"
+version = "0.1.0"
+description = "Flux: Chemical Process Digital Twin Simulation Engine"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy",
+  "scipy",
+  "pandas",
+  "polars",
+  "pydantic",
+  "kafka-python",
+  "clickhouse-driver",
+  "glassflow-clickhouse-etl",
+  "rich"
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "black", "ruff", "ipykernel", "jupyter"]
+viz = ["matplotlib", "plotly"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["flux*"]

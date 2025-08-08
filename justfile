@@ -1,41 +1,77 @@
-# ────────────────────────────────────────────────────────────────
-#  Flux justfile
-# ────────────────────────────────────────────────────────────────
-#  Usage:
-#     just <recipe>          # run recipe
-#     just -l                # list all
-#     just -d <recipe>       # show command without running
-# ----------------------------------------------------------------
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║                            FLUX PLATFORM JUSTFILE                            ║
+# ╠══════════════════════════════════════════════════════════════════════════════╣
+# ║  A high-performance digital twin for electrochemical processes               ║
+# ║                                                                              ║
+# ║  Usage:                                                                      ║
+# ║    just              → list all recipes                                      ║
+# ║    just <recipe>     → execute recipe                                        ║
+# ║    just --evaluate   → show all variables                                    ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
+set dotenv-load := true
+set export := true
 
-# Environment Variables -----------------------------------------------------------
-export UV_NO_PROGRESS := "true"
-export RUST_BACKTRACE := "1"
+# ═══════════════════════════════════════════════════════════════════════════════
+# Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# Paths -----------------------------------------------------------
+# --- Main ---
+VERSION := `git describe --tags --always --dirty 2>/dev/null || echo "dev"`
+TIMESTAMP := `date -u +"%Y-%m-%dT%H:%M:%SZ"`
 ROOT := justfile_directory()
-POC_DIR     := ROOT + "/poc"
-CORE_DIR    := ROOT + "/core"
-GUI_DIR     := ROOT + "/gui"
-SCRIPTS_DIR := POC_DIR + "/scripts"
 
+# --- Root Directories ---
+APPS_DIR := ROOT / "apps"
+CONFIG_DIR := ROOT / "config"
+DATA_DIR := ROOT / "data"
+INFRA_DIR := ROOT / "infra"
+LIB_DIR := ROOT / "lib"
+SCRIPTS_DIR := ROOT / "scripts"
+SERVICES_DIR := ROOT / "services"
+TESTS_DIR := ROOT / "tests"
+
+# --- Subdirectories ---
+# Apps
+MOBILE_APP_DIR := APPS_DIR / "mobile-app"
+OPERATOR_TUI_DIR := APPS_DIR / "operator-tui"
+WEB_DASHBOARD_DIR := APPS_DIR / "web-dashboard"
+
+# Services
+ALARM_MANAGER_DIR := SERVICES_DIR / "alarm-manager"
+DATA_PIPELINE_DIR := SERVICES_DIR / "data-pipeline"
+HISTORIAN_DIR := SERVICES_DIR / "historian"
+KPI_ENGINE_DIR := SERVICES_DIR / "kpi-engine"
+SIMULATOR_DIR := SERVICES_DIR / "simulator"
+
+# --- Build Configuration ---
+RUST_BACKTRACE := "1"
+RUST_LOG := "info"
+UV_NO_PROGRESS := "true"
+DOCKER_BUILDKIT := "1"
+
+# --- Recipes ---
 # Help
 default:
   @just --list --unsorted
 
 # Nix shells ------------------------------------------------------
 # Enter root dev shell
-dev-shell:
+shell-default:
 	@nix develop .
 
-# Enter poc dev shell
-poc-shell:
-	@cd "{{POC_DIR}}" && nix develop ..#poc
+# Enter simulator dev shell
+shell-simulator:
+  @cd "{{SIMULATOR_DIR}}" && nix develop ..#simulator
 
-# Enter core dev shell
-core-shell:
-	@cd "{{CORE_DIR}}" && nix develop ..#core
+# Enter simulator dev shell
+shell-kpi-engine:
+  @cd "{{KPI_ENGINE_DIR}}" && nix develop ..#kpi-engine
+
+# Enter simulator dev shell
+shell-operator-tui:
+  @cd "{{OPERATOR_TUI_DIR}}" && nix develop ..#operator-tui
 
 # Stack lifecycle -------------------------------------------------
 # Initialise workspace & copy compose file
@@ -99,26 +135,17 @@ glassflow-delete:
 
 # Run Python plant simulation for N seconds
 sim time="60":
-	cd "{{POC_DIR}}" && uv sync >/dev/null && \
+	cd "{{SIMULATOR_DIR}}" && uv sync >/dev/null && \
 	  python "{{SCRIPTS_DIR}}/run_simulation.py" -t {{time}}
 
-# Build & test ----------------------------------------------------
+# --- Build & Test ---
+# Build Operator TUI
+operator-tui-build:
+	@cd "{{OPERATOR_TUI_DIR}}" && cargo build --quiet --release
 
-# Build core
-core-build:
-	@cd "{{CORE_DIR}}" && cargo build --release
-
-# Test core
-core-test:
-	@cd "{{CORE_DIR}}" && cargo test
-
-# Build GUI
-gui-build:
-	@cd "{{GUI_DIR}}" && cargo build --quiet --release
-
-# Run GUI
-gui-run:
-	@cd "{{GUI_DIR}}" && ./target/release/flux-gui
+# Run Operator TUI
+operator-tui-run:
+	@cd "{{OPERATOR_TUI_DIR}}" && ./target/release/flux-gui
 
 # Pytest suite
 poc-test:

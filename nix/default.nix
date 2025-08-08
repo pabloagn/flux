@@ -9,8 +9,8 @@
   stopScript,
   statusScript,
 }:
-
 {
+  # Default shell
   default = import ./shell-default.nix {
     inherit
       pkgs
@@ -25,7 +25,34 @@
       ;
   };
 
-  poc = import ./shell-poc.nix {
+  # Application shells
+  app-tui = import ./shell-app-tui.nix {
+    inherit
+      pkgs
+      rustToolchain
+      libsPath
+      systemPackages
+      setupScript
+      startScript
+      stopScript
+      statusScript
+      ;
+  };
+
+  app-web = import ./shell-app-web.nix {
+    inherit
+      pkgs
+      libsPath
+      systemPackages
+      setupScript
+      startScript
+      stopScript
+      statusScript
+      ;
+  };
+
+  # Service shells
+  srv-sim = import ./shell-srv-sim.nix {
     inherit
       pkgs
       pythonBase
@@ -38,14 +65,16 @@
       ;
   };
 
-  core = import ./shell-core.nix {
+  srv-kpi = import ./shell-srv-kpi.nix {
     inherit
       pkgs
-      rustToolchain
+      pythonBase
       libsPath
       systemPackages
+      setupScript
       startScript
       stopScript
+      statusScript
       ;
   };
 }

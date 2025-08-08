@@ -30,4 +30,3 @@ pkgs.mkShell {
     export SETUPTOOLS_ENABLE_FEATURES=""
   '';
 }
-
