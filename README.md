@@ -12,6 +12,8 @@
 
 [![Last Commit](https://img.shields.io/github/last-commit/pabloagn/flux?style=for-the-badge&logo=git&logoColor=white&color=7AA89F&labelColor=000000&label=LAST%20COMMIT)](https://github.com/pabloagn/flux/commits/main) [![License](https://img.shields.io/github/license/pabloagn/flux?style=for-the-badge&color=7AA89F&labelColor=000000)](https://github.com/pabloagn/flux/blob/main/LICENSE)
 
+</div>
+
 ## Executive Summary
 
 FLUX is a production-ready digital twin platform for chlor-alkali electrolysis plants, processing 1M+ events/second from 180+ electrolytic cells. The system provides real-time plant control, predictive maintenance, and operational optimization while maintaining SIL-3 safety standards.
