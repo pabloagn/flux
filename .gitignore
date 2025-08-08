@@ -1,72 +1,76 @@
 # ─────────────────────────────────────────────────────────────────
 # Python
 # ─────────────────────────────────────────────────────────────────
-__pycache__/
-*.py[cod]
 *$py.class
+*.egg-info/
+*.py[cod]
 *.so
 .Python
-*.egg-info/
-dist/
-.venv/
-venv/
-.pytest_cache/
 .coverage
-htmlcov/
 .mypy_cache/
+.pytest_cache/
 .ruff_cache/
+.venv/
+__pycache__/
+dist/
+htmlcov/
 uv.lock
+venv/
 
 # ─────────────────────────────────────────────────────────────────
 # Rust
 # ─────────────────────────────────────────────────────────────────
-target/
-Cargo.lock
 **/*.rs.bk
 *.pdb
+Cargo.lock
+target/
 
 # ─────────────────────────────────────────────────────────────────
 # Nix
 # ─────────────────────────────────────────────────────────────────
-result
-result-*
 .direnv/
 .envrc
+result
+result-*
 
 # ─────────────────────────────────────────────────────────────────
 # IDE/Editor
 # ─────────────────────────────────────────────────────────────────
-.vscode/
-.idea/
-*.swp
 *.swo
+*.swp
 *~
 .DS_Store
+.idea/
+.vscode/
 
 # ─────────────────────────────────────────────────────────────────
 # Project Runtime
 # ─────────────────────────────────────────────────────────────────
-data/results/
-data/cache/
-logs/
 *.log
+data/cache/
+data/results/
+logs/
 tmp/
 
 # ─────────────────────────────────────────────────────────────────
 # Infrastructure
 # ─────────────────────────────────────────────────────────────────
-.terraform/
 *.tfstate
 *.tfstate.*
 .terraform.lock.hcl
+.terraform/
 
 # Docker volumes
-docker-volumes/
 .docker/
+docker-volumes/
+
+# Docker config & data
+**/docker/config
+**/docker/data
 
 # Kubernetes
-kubeconfig
 *.kubeconfig
+kubeconfig
 
 # ─────────────────────────────────────────────────────────────────
 # Secrets
@@ -74,22 +78,22 @@ kubeconfig
 .env
 .env.*
 !.env.example
+*.crt
 *.key
 *.pem
-*.crt
 secrets/
 
 # ─────────────────────────────────────────────────────────────────
 # Secrets
 # ─────────────────────────────────────────────────────────────────
-data/questdb/*
 data/clickhouse/*
+data/questdb/*
 data/scylladb/*
 !data/*/README.md
 
 # ─────────────────────────────────────────────────────────────────
 # Certificates (except CA)
 # ─────────────────────────────────────────────────────────────────
-certs/**/*.pem
 certs/**/*.key
+certs/**/*.pem
 !certs/ca/ca-cert.pem

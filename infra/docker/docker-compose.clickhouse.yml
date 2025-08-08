@@ -1,0 +1,21 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    hostname: clickhouse
+    container_name: flux-clickhouse
+    ports:
+      - "8123:8123"
+      - "9001:9000"
+    environment:
+      CLICKHOUSE_DB: flux
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - ../../config/schemas/clickhouse:/docker-entrypoint-initdb.d
+    networks:
+      - flux-net
+
+networks:
+  flux-net:
+    driver: bridge

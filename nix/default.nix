@@ -4,7 +4,6 @@
   pythonBase,
   libsPath,
   systemPackages,
-  setupScript,
   startScript,
   stopScript,
   statusScript,
@@ -18,7 +17,6 @@
       pythonBase
       libsPath
       systemPackages
-      setupScript
       startScript
       stopScript
       statusScript
@@ -32,7 +30,6 @@
       rustToolchain
       libsPath
       systemPackages
-      setupScript
       startScript
       stopScript
       statusScript
@@ -44,7 +41,6 @@
       pkgs
       libsPath
       systemPackages
-      setupScript
       startScript
       stopScript
       statusScript
@@ -58,7 +54,6 @@
       pythonBase
       libsPath
       systemPackages
-      setupScript
       startScript
       stopScript
       statusScript
@@ -71,7 +66,17 @@
       pythonBase
       libsPath
       systemPackages
-      setupScript
+      startScript
+      stopScript
+      statusScript
+      ;
+  };
+
+  srv-data-pipeline = import ./shell-srv-data-pipeline.nix {
+    inherit
+      pkgs
+      pythonBase
+      systemPackages
       startScript
       stopScript
       statusScript

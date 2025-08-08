@@ -3,13 +3,14 @@
   pythonBase,
   libsPath,
   systemPackages,
-  setupScript,
   startScript,
   stopScript,
   statusScript,
 }:
 
 pkgs.mkShell {
+  name = "shell-srv-sim";
+
   buildInputs =
     [
       pythonBase
@@ -17,7 +18,6 @@ pkgs.mkShell {
     ]
     ++ systemPackages
     ++ [
-      setupScript
       startScript
       stopScript
       statusScript

@@ -1,0 +1,4 @@
+networks:
+  flux-net:
+    name: flux-net
+    driver: bridge

@@ -35,14 +35,16 @@
           btop
           clickhouse
           cmake
+          curl
+          confluent-platform # Provides kafka-console-consumer
           dive
           docker-compose
           gcc
           git
           httpie
           jq
+          just
           kcat
-          confluent-platform # Provides kafka-console-consumer
           lazydocker
           openssl
           pkg-config
@@ -51,64 +53,7 @@
           yq-go
         ];
 
-        # ─────────────── docker-compose file ─────────────
-        dockerComposeFile = pkgs.writeText "docker-compose.yml" ''
-          services:
-            kafka:
-              image: confluentinc/cp-kafka:7.5.5
-              environment:
-                KAFKA_BROKER_ID: "1"
-                KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
-                KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,PLAINTEXT_INTERNAL://0.0.0.0:9093"
-                KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:9093"
-                KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT"
-                KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT_INTERNAL"
-                KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
-              ports: [ "9092:9092" ]
-              depends_on: [ zookeeper ]
-
-            zookeeper:
-              image: confluentinc/cp-zookeeper:latest
-              environment:
-                ZOOKEEPER_CLIENT_PORT: "2181"
-                ZOOKEEPER_TICK_TIME:  "2000"
-              ports: [ "2181:2181" ]
-
-            clickhouse:
-              image: clickhouse/clickhouse-server:latest
-              ports: [ "8123:8123", "9000:9000" ]
-              environment:
-                CLICKHOUSE_DB: flux
-                CLICKHOUSE_USER: default
-                CLICKHOUSE_PASSWORD: ""
-                CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
-              volumes:
-                - ./config/clickhouse:/docker-entrypoint-initdb.d:ro
-
-            nats:
-              image: nats:alpine
-              command: [ "-js" ]
-              ports: [ "4222:4222", "8222:8222" ]
-
-            glassflow:
-              image: glassflow/clickhouse-etl-be:stable
-              ports: [ "8080:8080" ]
-              environment:
-                GLASSFLOW_LOG_FILE_PATH: /tmp/logs/glassflow
-                GLASSFLOW_NATS_SERVER: nats:4222
-              depends_on: [ kafka, clickhouse, nats ]
-        '';
-
         # ─────────────── Helper Scripts ────────────────
-        setupScript = pkgs.writeShellScriptBin "flux-setup" ''
-          FLUX_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-          mkdir -p $FLUX_ROOT/infra/docker \
-                   $FLUX_ROOT/data/{sample,results} \
-                   $FLUX_ROOT/config/schemas/{clickhouse,kafka}
-          cp ${dockerComposeFile} $FLUX_ROOT/infra/docker/docker-compose.yml
-          echo "Run 'flux-start' to boot services."
-        '';
-
         startScript = pkgs.writeShellScriptBin "flux-start" ''
           FLUX_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
           cd $FLUX_ROOT/infra/docker && docker-compose up -d
@@ -148,7 +93,6 @@
             pythonBase
             libsPath
             systemPackages
-            setupScript
             startScript
             stopScript
             statusScript
@@ -157,10 +101,13 @@
       in
       {
         # ─────────────── Development Shells ───────────────
+        # Default shell
         devShells.default = shells.default;
-        devShells.simulator = shells.simulator;
-        devShells.tui = shells.tui;
-        devShells.kpi = shells.kpi;
+
+        # Apps & Services
+        devShells.app-tui = shells.app-tui;
+        devShells.srv-kpi = shells.srv-kpi;
+        devShells.srv-sim = shells.srv-sim;
 
         # ─────────────── Packages ───────────────
         packages = {

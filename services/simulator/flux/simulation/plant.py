@@ -1,10 +1,10 @@
 """Plant simulation"""
 
 from __future__ import annotations
-import asyncio, time
-from datetime import datetime
-from collections import defaultdict
-from typing import Dict, List, Tuple
+import asyncio
+import time
+from datetime import datetime, timezone
+from typing import Dict, Any
 
 from flux.utils.log import get_logger, banner, task_progress
 from flux.config.simulations import CFG
@@ -18,28 +18,26 @@ log = get_logger(__name__)
 UNITS = CFG.geometry.units
 STACKS = CFG.geometry.stacks
 CELLS_PER_STACK = CFG.geometry.cells_per_stack
-SAMPLE: Dict[str, float] = CFG.sampling.intervals
-NOISE_STD: Dict[str, float] = CFG.noise.stddev()
-TOPIC = CFG.topics.as_dict()
+# We run the main loop at the highest frequency
+HIGHEST_FREQUENCY_HZ = CFG.sampling.electrical_hz
+SAMPLING_INTERVAL_S = 1 / HIGHEST_FREQUENCY_HZ
+# The single, canonical topic for all cell metrics
+CANONICAL_TOPIC = "flux.cell.metrics.v1"
 
 
 # --- Helper Builders ---
 def make_cell(unit: int, stack: str, idx: int) -> ElectrolyzerCell:
-    return ElectrolyzerCell(f"U{unit}_S{stack}_C{idx:02d}")
+    return ElectrolyzerCell(f"U{unit}_S{stack}_C{idx:02d}", area=CFG.geometry.membrane_area_m2)
 
 
 def make_sensors(cell_id: str) -> Dict[str, Sensor]:
-    n = NOISE_STD
+    n = CFG.noise.stddev()
     return {
         "voltage": Sensor(f"{cell_id}_V1", "voltage", noise_stddev=n["voltage"]),
         "current": Sensor(f"{cell_id}_I", "current", noise_stddev=n["current"]),
         "pressure": Sensor(f"{cell_id}_DP", "pressure", noise_stddev=n["pressure"]),
-        "temp_anolyte": Sensor(
-            f"{cell_id}_TA", "temperature", noise_stddev=n["temp_anolyte"]
-        ),
-        "temp_catholyte": Sensor(
-            f"{cell_id}_TC", "temperature", noise_stddev=n["temp_catholyte"]
-        ),
+        "temp_anolyte": Sensor(f"{cell_id}_TA", "temperature", noise_stddev=n["temp_anolyte"]),
+        "temp_catholyte": Sensor(f"{cell_id}_TC", "temperature", noise_stddev=n["temp_catholyte"]),
     }
 
 
@@ -50,7 +48,6 @@ class PlantSimulator:
     def __init__(self, producer: SensorDataProducer, run_seconds: int = 60):
         self.producer = producer
         self.run_seconds = run_seconds
-
         self.cells: Dict[str, ElectrolyzerCell] = {}
         self.sensors: Dict[str, Dict[str, Sensor]] = {}
 
@@ -60,78 +57,89 @@ class PlantSimulator:
                 for c in range(1, CELLS_PER_STACK + 1):
                     cell = make_cell(u, s, c)
                     self.cells[cell.cell_id] = cell
+                    # Sensors are now just for internal simulation, not for structuring output
                     self.sensors[cell.cell_id] = make_sensors(cell.cell_id)
 
         log.info(
-            "Plant ready (%d cells, %d sensors)",
+            "Plant ready (%d cells, %d sensors). Emitting to topic '%s' at %.1f Hz.",
             len(self.cells),
             sum(len(v) for v in self.sensors.values()),
+            CANONICAL_TOPIC,
+            HIGHEST_FREQUENCY_HZ,
         )
 
-        # bucket sensors by sampling interval
-        self._sensor_buckets: Dict[int, List[Tuple[ElectrolyzerCell, str, Sensor]]] = (
-            defaultdict(list)
-        )
-        for cell in self.cells.values():
-            for mtype, sensor in self.sensors[cell.cell_id].items():
-                dt = int(SAMPLE[mtype])
-                self._sensor_buckets[dt].append((cell, mtype, sensor))
+    def _get_noisy_value(
+        self, cell_id: str, measurement_type: str, true_value: float, dt: float
+    ) -> tuple[float | None, float]:
+        """Helper to get a noisy sensor reading and its quality."""
+        sensor = self.sensors[cell_id][measurement_type]
+        reading = sensor.read(true_value, dt=dt)
+        return reading.get("value"), reading.get("quality", 1.0) / 100.0
 
-    # ---------------------------------------------------------------- loop
-    async def _loop(self, dt: int, bucket: List[Tuple[ElectrolyzerCell, str, Sensor]]):
-        """Stream all sensors in *bucket* every *dt* seconds."""
-        end_wall = time.time() + self.run_seconds
-        total_msgs = 0
-        while time.time() < end_wall:
-            tick_ts = datetime.utcnow().isoformat()
-            for cell, mtype, sensor in bucket:
-                # physics + measurement
-                state = cell.step(dt=dt)
-                true_val = {
-                    "voltage": state["voltage"],
-                    "current": state["current"],
-                    "pressure": state["pressure_diff"],
-                    "temp_anolyte": state["temperature"],
-                    "temp_catholyte": state["temperature"],
-                }[mtype]
-                reading = sensor.read(true_val, dt=dt)
-
-                payload = {
-                    "ts": tick_ts,
-                    "unit": int(cell.cell_id.split('_')[0][1:]),
-                    "stack": cell.cell_id.split('_')[1][1:],
-                    "cell": int(cell.cell_id[-2:]),
-                    "sensor_id": reading["sensor_id"],
-                    "status": reading["status"],
-                    "quality": reading["quality"],
-                }
-                if mtype in ("voltage", "current"):
-                    payload["voltage_V" if mtype == "voltage" else "current_A"] = (
-                        reading["value"]
-                    )
-                elif "temp" in mtype:
-                    payload["temperature_C"] = reading["value"]
-                else:
-                    payload["pressure_mbar"] = reading["value"]
-
-                self.producer.send(TOPIC[mtype], payload, key=cell.cell_id)
-                total_msgs += 1
-
-            await asyncio.sleep(dt)
-
-        log.info("Loop %ds finished (%d msgs)", dt, total_msgs)
-
-    # --- Api ---
     async def run(self):
-        with task_progress("running plant simulation"):
-            tasks = [
-                asyncio.create_task(self._loop(dt, bucket))
-                for dt, bucket in self._sensor_buckets.items()
-            ]
-            await asyncio.gather(*tasks)
+        """
+        Main simulation loop.
+        Runs at the highest sampling frequency and emits a complete, unified
+        payload for every cell on each tick.
+        """
+        with task_progress(f"Running plant simulation for {self.run_seconds}s"):
+            end_time = time.time() + self.run_seconds
+            total_msgs = 0
+
+            while time.time() < end_time:
+                loop_start_time = time.time()
+                tick_ts = datetime.now(timezone.utc)
+
+                for cell in self.cells.values():
+                    # 1. Advance the physical state of the cell
+                    state = cell.step(dt=SAMPLING_INTERVAL_S)
+
+                    # 2. Get noisy readings for all sensors to simulate real-world data
+                    voltage, v_quality = self._get_noisy_value(
+                        cell.cell_id, "voltage", state["voltage"], SAMPLING_INTERVAL_S
+                    )
+                    current, c_quality = self._get_noisy_value(
+                        cell.cell_id, "current", state["current"], SAMPLING_INTERVAL_S
+                    )
+                    pressure, p_quality = self._get_noisy_value(
+                        cell.cell_id, "pressure", state["pressure_diff"], SAMPLING_INTERVAL_S
+                    )
+                    temp, t_quality = self._get_noisy_value(
+                        cell.cell_id, "temp_anolyte", state["temperature"], SAMPLING_INTERVAL_S
+                    )
+
+                    # 3. Construct the single, unified payload
+                    # This structure MUST match the CellMetric Pydantic model in the data-pipeline
+                    payload = {
+                        "ts": tick_ts.isoformat(),
+                        "unit_id": int(cell.cell_id.split("_")[0][1:]),
+                        "stack_id": cell.cell_id.split("_")[1][1:],
+                        "cell_id": int(cell.cell_id[-2:]),
+                        "voltage_v": voltage,
+                        "current_a": current,
+                        "temperature_c": temp,
+                        "pressure_mbar": pressure,
+                        "efficiency_pct": state["current_efficiency"],
+                        "power_kw": (voltage * current / 1000) if voltage and current else None,
+                        # These would be calculated by a separate analytics service in a real system,
+                        # but we can simulate them here.
+                        "specific_energy": None,
+                        "membrane_resistance": None,
+                        "sensor_quality": min(v_quality, c_quality, p_quality, t_quality),
+                    }
+
+                    # 4. Send to the canonical topic
+                    self.producer.send(CANONICAL_TOPIC, payload, key=cell.cell_id)
+                    total_msgs += 1
+
+                # Maintain the loop frequency
+                loop_duration = time.time() - loop_start_time
+                await asyncio.sleep(max(0, SAMPLING_INTERVAL_S - loop_duration))
+
+        log.info("Simulation loop finished. Total messages sent: %d", total_msgs)
 
 
-# --- CLI Helper ---
+# --- CLI Helper (no changes needed here) ---
 def main() -> None:
     import argparse, os
 
@@ -145,9 +153,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    producer = SensorDataProducer(
-        os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-    )
+    producer = SensorDataProducer(os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"))
     sim = PlantSimulator(producer, run_seconds=args.time)
 
     try:

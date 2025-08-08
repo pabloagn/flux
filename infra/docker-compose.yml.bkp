@@ -1,0 +1,109 @@
+#
+# FLUX Core Infrastructure Stack
+#
+# Defines all services required for the High-Speed Control and Analytics pipelines.
+#
+version: "3.8"
+
+services:
+  # --- Message Broker & Streaming ---
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.3
+    hostname: zookeeper
+    container_name: flux-zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.3
+    hostname: kafka
+    container_name: flux-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+  nats:
+    image: nats:alpine
+    hostname: nats
+    container_name: flux-nats
+    command: ["-js"] # Enable JetStream
+    ports:
+      - "4222:4222"
+      - "8222:8222" # Monitoring
+
+  # --- Databases ---
+  questdb:
+    image: questdb/questdb:7.3.1
+    hostname: questdb
+    container_name: flux-questdb
+    ports:
+      - "9000:9000"
+      - "8812:8812"
+      - "9009:9009"
+    environment:
+      - QDB_PG_USER=flux_operator
+      - QDB_PG_PASSWORD=flux_questdb_2024
+    volumes:
+      - ../../data/questdb:/var/lib/questdb
+      - ../../config/questdb:/var/lib/questdb/conf
+      - ../../config/schemas/questdb:/docker-entrypoint-initdb.d
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    hostname: clickhouse
+    container_name: flux-clickhouse
+    ports:
+      - "8123:8123"
+      - "9001:9000" # Remap internal 9000 to 9001 to avoid conflict with QuestDB
+    environment:
+      CLICKHOUSE_DB: flux
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - ../../config/schemas/clickhouse:/docker-entrypoint-initdb.d
+
+  # --- Services ---
+  data-pipeline:
+    build:
+      context: ../../services/data-pipeline
+      dockerfile: Dockerfile
+    hostname: data-pipeline
+    container_name: flux-data-pipeline
+    depends_on:
+      - kafka
+      - questdb
+    restart: unless-stopped
+    environment:
+      - KAFKA_BROKERS=kafka:9093
+      - QUESTDB_HOST=questdb
+      - QUESTDB_PORT=8812
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8000:8000"
+
+  glassflow:
+    image: glassflow/clickhouse-etl-be:stable
+    hostname: glassflow
+    container_name: flux-glassflow
+    depends_on:
+      - kafka
+      - clickhouse
+      - nats
+    ports:
+      - "8080:8080"
+    environment:
+      - GLASSFLOW_LOG_FILE_PATH=/tmp/logs/glassflow
+      - GLASSFLOW_NATS_SERVER=nats:4222

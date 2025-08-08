@@ -61,37 +61,48 @@ default:
 shell-default:
 	@nix develop .
 
-# Enter simulator dev shell
-shell-simulator:
-  @cd "{{SIMULATOR_DIR}}" && nix develop ..#simulator
-
-# Enter simulator dev shell
-shell-kpi-engine:
-  @cd "{{KPI_ENGINE_DIR}}" && nix develop ..#kpi-engine
-
-# Enter simulator dev shell
-shell-operator-tui:
-  @cd "{{OPERATOR_TUI_DIR}}" && nix develop ..#operator-tui
+# TODO: Add the rest of the devshells here
 
 # Stack lifecycle -------------------------------------------------
-# Initialise workspace & copy compose file
-setup:
-  @rm -f poc/docker-compose.yml
-  @flux-setup
+stack-up:
+	@echo "Starting FLUX production stack..."
+	@docker compose \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.base.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.zookeeper.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.kafka.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.nats.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.questdb.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.clickhouse.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.data-pipeline.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.glassflow.yml" \
+	  up -d --build
 
-# Boot Kafka, ClickHouse, NATS, GlassFlow
-start:
-  @flux-start
+stack-down:
+	@echo "Stopping FLUX production stack..."
+	@docker compose \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.base.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.zookeeper.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.kafka.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.nats.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.questdb.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.clickhouse.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.data-pipeline.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.glassflow.yml" \
+	  down
 
-# Stop containers
-stop:           
-	@flux-stop
+stack-status:
+	@docker compose \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.base.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.zookeeper.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.kafka.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.nats.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.questdb.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.clickhouse.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.data-pipeline.yml" \
+	  -f "{{INFRA_DIR}}/docker/docker-compose.glassflow.yml" \
+	  ps
 
-# Pretty status table
-status:         
-	@flux-status
-
-stack-restart: stop start
+stack-restart: stack-down stack-up
 
 # Kafka -----------------------------------------------------------
 

@@ -1,5 +1,5 @@
 [package]
-name = "flux-gui"
+name = "flux-operator-tui"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,6 +9,7 @@ chrono = "0.4.41"
 clickhouse = "0.11"                                                            # Clickhouse bridge
 crossterm = "0.27"
 ctor = "0.2"
+deadpool-postgres = "0.12"
 env_logger = "0.11"                                                            # simple stdout logger
 futures = "0.3"
 log = "0.4"                                                                    # logging facade

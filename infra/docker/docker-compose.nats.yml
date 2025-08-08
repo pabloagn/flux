@@ -1,0 +1,15 @@
+services:
+  nats:
+    image: nats:alpine
+    hostname: nats
+    container_name: flux-nats
+    command: ["-js"] # Enable JetStream for persistence and streaming
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    networks:
+      - flux-net
+
+networks:
+  flux-net:
+    driver: bridge

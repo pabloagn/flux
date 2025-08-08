@@ -1,0 +1,59 @@
+services:
+  questdb:
+    image: questdb/questdb:7.3.10
+    container_name: flux-questdb
+    ports:
+      - "9000:9000" # HTTP API & Web Console
+      - "8812:8812" # PostgreSQL wire protocol
+      - "9009:9009" # InfluxDB line protocol (TCP)
+    environment:
+      - QDB_TELEMETRY_ENABLED=false
+      - JAVA_OPTS=-Xms4g -Xmx8g -XX:+UseG1GC
+    volumes:
+      - ./data/questdb:/var/lib/questdb
+      - ./config/questdb/questdb.conf:/etc/questdb/server.conf:ro
+      - ./config/schemas/questdb/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9000/exec?query=SELECT%201"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - flux-net
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 8G
+        reservations:
+          cpus: "2"
+          memory: 4G
+
+  questdb-writer:
+    build:
+      context: ../../services/data-pipeline
+      dockerfile: Dockerfile
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - QUESTDB_HOST=questdb
+      - QUESTDB_PORT=8812
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      questdb:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - flux-net
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+
+networks:
+  flux-net:
+    driver: bridge

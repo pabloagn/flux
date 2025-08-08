@@ -11,10 +11,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             Constraint::Length(1),
         ])
         .split(f.size());
-
     render_header(f, main_layout[0], app);
     render_tabs(f, main_layout[1], app);
-
     match app.current_view {
         ViewMode::Overview => render_overview(f, main_layout[2], app),
         ViewMode::Performance => render_performance(f, main_layout[2], app),
@@ -22,10 +20,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         ViewMode::CellDetail => render_cell_detail(f, main_layout[2], app),
         _ => render_placeholder(f, main_layout[2], &format!("{:?}", app.current_view)),
     }
-
     render_footer(f, main_layout[3], app);
 }
-
 fn render_header(f: &mut Frame, area: Rect, app: &App) {
     let text = format!(
         "FLUX CHLOR-ALKALI v4.1 | Power: {:.1} MW | Efficiency: {:.1}% | Cl₂: {:.1} MT/d",
@@ -38,7 +34,6 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
         area,
     );
 }
-
 fn render_tabs(f: &mut Frame, area: Rect, app: &App) {
     let titles = vec![
         "Overview [F1]",
@@ -57,7 +52,6 @@ fn render_tabs(f: &mut Frame, area: Rect, app: &App) {
         area,
     );
 }
-
 fn render_overview(f: &mut Frame, area: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
@@ -67,18 +61,15 @@ fn render_overview(f: &mut Frame, area: Rect, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(9), Constraint::Min(0)])
         .split(chunks[1]);
-
     let overview_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(0), Constraint::Length(3)])
         .split(chunks[0]);
-
     render_main_grid(f, overview_chunks[0], app);
     render_horizontal_scrollbar(f, overview_chunks[1], app);
     render_kpi_cards(f, side_chunks[0], app);
     render_selection_details(f, side_chunks[1], app);
 }
-
 fn render_main_grid(f: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .title(" Plant Overview ")
@@ -89,11 +80,9 @@ fn render_main_grid(f: &mut Frame, area: Rect, app: &mut App) {
         vertical: 1,
         horizontal: 1,
     });
-
     let unit_width = (app.cfg.plant.geometry.stacks.len() * 3) + 3;
     let units_that_fit = (inner_area.width as usize).saturating_sub(1) / unit_width;
     let total_units = app.cfg.plant.geometry.units.len();
-
     let selected_unit_idx = app
         .cfg
         .plant
@@ -102,7 +91,6 @@ fn render_main_grid(f: &mut Frame, area: Rect, app: &mut App) {
         .iter()
         .position(|&u| u == app.selected_unit)
         .unwrap_or(0);
-
     if selected_unit_idx < app.unit_scroll_offset {
         app.unit_scroll_offset = selected_unit_idx;
     }
@@ -112,7 +100,6 @@ fn render_main_grid(f: &mut Frame, area: Rect, app: &mut App) {
     app.unit_scroll_offset = app
         .unit_scroll_offset
         .min(total_units.saturating_sub(units_that_fit));
-
     let visible_units = app
         .cfg
         .plant
@@ -127,17 +114,14 @@ fn render_main_grid(f: &mut Frame, area: Rect, app: &mut App) {
         .take(visible_units.len())
         .collect::<Vec<_>>();
     constraints.push(Constraint::Min(0));
-
     let unit_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(constraints)
         .split(inner_area);
-
     for (i, unit_id) in visible_units.iter().enumerate() {
         render_unit_display(f, unit_chunks[i], app, *unit_id);
     }
 }
-
 fn render_unit_display(f: &mut Frame, area: Rect, app: &mut App, unit_id: u8) {
     let is_active_unit = app.selected_unit == unit_id;
     let border_style = if is_active_unit {
@@ -145,26 +129,21 @@ fn render_unit_display(f: &mut Frame, area: Rect, app: &mut App, unit_id: u8) {
     } else {
         Style::new().fg(Color::DarkGray)
     };
-
     let block = Block::default()
         .title(format!(" Unit {} ", unit_id))
         .borders(Borders::ALL)
         .border_style(border_style);
     f.render_widget(block, area);
-
     let inner = area.inner(&Margin {
         vertical: 1,
         horizontal: 1,
     });
-
     let content_area = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Min(0), Constraint::Length(1)])
         .split(inner);
-
     let stacks_area = content_area[0];
     let scrollbar_area = content_area[1];
-
     let stack_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(
@@ -173,10 +152,8 @@ fn render_unit_display(f: &mut Frame, area: Rect, app: &mut App, unit_id: u8) {
                 .collect::<Vec<_>>(),
         )
         .split(stacks_area);
-
     let scroll_offset = app.cell_scroll_offsets.entry(unit_id).or_default();
     let visible_height = stacks_area.height.saturating_sub(1) as u8;
-
     if is_active_unit {
         if app.selected_cell < *scroll_offset + 1 {
             *scroll_offset = app.selected_cell.saturating_sub(1);
@@ -185,26 +162,22 @@ fn render_unit_display(f: &mut Frame, area: Rect, app: &mut App, unit_id: u8) {
             *scroll_offset = app.selected_cell.saturating_sub(visible_height);
         }
     }
-
     for (i, &stack_id) in app.cfg.plant.geometry.stacks.iter().enumerate() {
         let mut lines = vec![Line::from(Span::styled(
             stack_id.to_string(),
             Style::new().fg(Color::Cyan).bold(),
         ))
         .alignment(Alignment::Center)];
-
         for row in 0..visible_height {
             let cell_id = *scroll_offset + 1 + row;
             if cell_id > app.cfg.plant.geometry.cells_per_stack {
                 break;
             }
-
             let key = format!("U{unit_id}_S{stack_id}_C{cell_id:02}");
             let (glyph, color) = match app.cells.get(&key) {
                 Some(cd) => get_cell_display(cd),
                 None => ('·', Color::DarkGray),
             };
-
             let is_cell_selected =
                 is_active_unit && app.selected_stack == stack_id && app.selected_cell == cell_id;
             let (text, style) = if is_cell_selected {
@@ -219,20 +192,14 @@ fn render_unit_display(f: &mut Frame, area: Rect, app: &mut App, unit_id: u8) {
         }
         f.render_widget(Paragraph::new(lines), stack_chunks[i]);
     }
-
     let total_cells = app.cfg.plant.geometry.cells_per_stack as usize;
     let visible_cells = visible_height as usize;
-
     let max_scroll = total_cells.saturating_sub(visible_cells);
-
     let mut scrollbar_state = ScrollbarState::new(max_scroll).position(*scroll_offset as usize);
-
     let scrollbar =
         Scrollbar::new(ScrollbarOrientation::VerticalRight).style(Style::new().fg(Color::DarkGray));
-
     f.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
 }
-
 fn render_horizontal_scrollbar(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .title("Plant Minimap")
@@ -243,13 +210,11 @@ fn render_horizontal_scrollbar(f: &mut Frame, area: Rect, app: &App) {
         vertical: 0,
         horizontal: 1,
     });
-
     let unit_width = (app.cfg.plant.geometry.stacks.len() * 3) + 3;
     let units_that_fit = (f.size().width as usize)
         .saturating_sub(35)
         .saturating_sub(2)
         / unit_width;
-
     let spans: Vec<Span> = app
         .cfg
         .plant
@@ -286,19 +251,24 @@ fn render_horizontal_scrollbar(f: &mut Frame, area: Rect, app: &App) {
             Span::styled(symbol, Style::new().fg(color))
         })
         .collect();
-
     f.render_widget(Paragraph::new(Line::from(spans)), inner);
 }
 
 fn get_cell_display(cell: &CellData) -> (char, Color) {
-    if cell.voltage > 3.5 || cell.temperature > 95.0 {
-        ('█', Color::Red)
-    } else if cell.voltage > 3.3 || cell.temperature > 90.0 {
-        ('▓', Color::Yellow)
+    if cell.sensor_quality < 0.9 {
+        ('?', Color::Magenta) // Sensor fault
+    } else if cell.voltage > app.cfg.limits.critical.voltage_v
+        || cell.temperature > app.cfg.limits.critical.temperature_c
+    {
+        ('█', Color::Red) // Critical
+    } else if cell.voltage > app.cfg.limits.warning.voltage_v
+        || cell.temperature > app.cfg.limits.warning.temperature_c
+    {
+        ('▓', Color::Yellow) // Warning
     } else if cell.efficiency < 92.0 {
-        ('▒', Color::Cyan)
+        ('▒', Color::Cyan) // Inefficient
     } else {
-        ('█', Color::Green)
+        ('█', Color::Green) // Healthy
     }
 }
 
@@ -340,16 +310,31 @@ fn render_selection_details(f: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_style(Style::new().fg(Color::Yellow));
     let inner = area.inner(&Margin {
-        vertical: 0,
+        vertical: 1,
         horizontal: 1,
     });
     f.render_widget(block, area);
+
     let text = if let Some(cell) = app.get_selected_cell_data() {
         let (glyph, color) = get_cell_display(cell);
+
+        let status_text = if cell.sensor_quality < 0.9 {
+            "SENSOR FAULT"
+        } else if color == Color::Red {
+            "CRITICAL"
+        } else if color == Color::Yellow {
+            "WARNING"
+        } else {
+            "HEALTHY"
+        };
+
         vec![
             Line::from(vec![
                 Span::from("Status:       "),
-                Span::styled(format!("{} HEALTHY", glyph), Style::new().fg(color).bold()),
+                Span::styled(
+                    format!("{} {}", glyph, status_text),
+                    Style::new().fg(color).bold(),
+                ),
             ]),
             Line::from(format!(
                 "Last Update:  {}",
@@ -363,9 +348,13 @@ fn render_selection_details(f: &mut Frame, area: Rect, app: &App) {
             Line::from(format!("Efficiency:   {:>6.1} %", cell.efficiency)),
             Line::from(format!("Power:        {:>6.2} kW", cell.power_kw)),
             Line::from(""),
-            Line::from("━━━ PREDICTIVE (Simulated) ━━━"),
-            Line::from(format!("Health Score: {:>6.1} %", 98.3)),
-            Line::from(format!("RUL (days):   {:>6}", 1240)),
+            Line::from("━━━ DIAGNOSTICS ━━━"),
+            Line::from(format!(
+                "Sensor Qual:  {:>6.1} %",
+                cell.sensor_quality * 100.0
+            )),
+            Line::from(format!("Spec. Energy: {:>6.0} kWh/t", cell.specific_energy)),
+            Line::from(format!("Membrane Ω:   {:>6.3}", cell.membrane_resistance)),
             Line::from(""),
             Line::from("Press [Enter] for deep dive...").fg(Color::Cyan),
         ]
@@ -376,6 +365,7 @@ fn render_selection_details(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_cell_detail(f: &mut Frame, area: Rect, app: &App) {
+    // ... (This function remains the same, but could be enhanced later) ...
     let block = Block::default()
         .title(format!(" Deep Dive: {} ", app.get_selected_cell_key()))
         .borders(Borders::ALL)
@@ -385,7 +375,6 @@ fn render_cell_detail(f: &mut Frame, area: Rect, app: &App) {
         vertical: 1,
         horizontal: 1,
     });
-
     if let Some(cell) = app.get_selected_cell_data() {
         if cell.voltage_history.is_empty() {
             f.render_widget(
@@ -438,7 +427,6 @@ fn render_cell_detail(f: &mut Frame, area: Rect, app: &App) {
         );
     }
 }
-
 fn render_economics(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .title(" Economic Performance ")
@@ -456,7 +444,7 @@ fn render_economics(f: &mut Frame, area: Rect, app: &App) {
             Cell::from(format!("{:.1}%", app.metrics.gross_margin)),
             Cell::from(format!(
                 "$ {:.0}",
-                (app.metrics.hourly_revenue - app.metrics.hourly_energy_cost) * 24.0
+                (app.metrics.hourly_revenue - app.metrics.hourly_energy_cost) * 24.0,
             )),
         ])
         .height(2)
@@ -477,7 +465,6 @@ fn render_economics(f: &mut Frame, area: Rect, app: &App) {
     .column_spacing(2);
     f.render_widget(table, inner_area);
 }
-
 fn render_performance(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .title(" Real-Time Performance Metrics ")
@@ -488,7 +475,6 @@ fn render_performance(f: &mut Frame, area: Rect, app: &App) {
         vertical: 1,
         horizontal: 1,
     });
-
     let gauge_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -498,7 +484,6 @@ fn render_performance(f: &mut Frame, area: Rect, app: &App) {
             Constraint::Percentage(25),
         ])
         .split(inner);
-
     let efficiency_pct = app.metrics.avg_efficiency.clamp(0.0, 100.0) as u16;
     let efficiency_gauge = Gauge::default()
         .block(Block::default().title("Current Efficiency"))
@@ -510,7 +495,6 @@ fn render_performance(f: &mut Frame, area: Rect, app: &App) {
         }))
         .label(format!("{:.1}%", app.metrics.avg_efficiency));
     f.render_widget(efficiency_gauge, gauge_chunks[0]);
-
     let power_pct = ((app.metrics.total_power_mw / 8.0) * 100.0).clamp(0.0, 100.0) as u16;
     let power_gauge = Gauge::default()
         .block(Block::default().title("Power Consumption"))
@@ -519,7 +503,6 @@ fn render_performance(f: &mut Frame, area: Rect, app: &App) {
         .label(format!("{:.1} MW", app.metrics.total_power_mw));
     f.render_widget(power_gauge, gauge_chunks[1]);
 }
-
 fn render_placeholder(f: &mut Frame, area: Rect, title: &str) {
     let text = format!("'{}' View Not Implemented Yet", title);
     let placeholder = Paragraph::new(text).alignment(Alignment::Center).block(
@@ -529,7 +512,6 @@ fn render_placeholder(f: &mut Frame, area: Rect, title: &str) {
     );
     f.render_widget(placeholder, area);
 }
-
 fn render_footer(f: &mut Frame, area: Rect, app: &App) {
     let help_text = " [↑↓←→] Navigate | [PgUp/PgDn] Scroll | [Enter] Details | [Tab] View | [Space] Pause | [Q] Quit ";
     let status_text = format!(
@@ -542,7 +524,6 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
         app.cells.len(),
         app.messages_per_second
     );
-
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([

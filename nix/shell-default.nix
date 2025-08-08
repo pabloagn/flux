@@ -4,17 +4,17 @@
   pythonBase,
   libsPath,
   systemPackages,
-  setupScript,
   startScript,
   stopScript,
   statusScript,
 }:
 
 pkgs.mkShell {
+  name = "shell-default";
+
   buildInputs = systemPackages ++ [
     pythonBase
     rustToolchain
-    setupScript
     startScript
     stopScript
     statusScript
@@ -30,4 +30,3 @@ pkgs.mkShell {
     export SETUPTOOLS_ENABLE_FEATURES=""
   '';
 }
-
