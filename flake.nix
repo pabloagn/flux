@@ -21,7 +21,7 @@
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
 
-        # Rust Environments
+        # --- Base Toolchains & Environments ---
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [
             "rust-src"
@@ -29,7 +29,7 @@
           ];
         };
 
-        # --- Python Environments ---
+        # ... (Python environments remain the same)
         pythonEnv = pkgs.python311.withPackages (
           ps: with ps; [
             hatchling
@@ -37,7 +37,6 @@
             uv
           ]
         );
-
         pythonEnvForKpiEngine = pkgs.python311.withPackages (
           ps: with ps; [
             aiokafka
@@ -49,7 +48,6 @@
             uv
           ]
         );
-
         pythonEnvForDataPipeline = pkgs.python311.withPackages (
           ps: with ps; [
             hatchling
@@ -62,10 +60,52 @@
           ]
         );
 
-        buildRustApp =
-          { pname, src }:
-          pkgs.rustPlatform.buildRustPackage {
-            inherit pname;
+      in
+      {
+        # --- Development Shells ---
+        devShells = import ./nix {
+          inherit pkgs rustToolchain;
+          pythonBase = pythonEnv;
+          libsPath = "${pkgs.stdenv.cc.cc.lib}/lib";
+          systemPackages = with pkgs; [
+            btop
+            cmake
+            confluent-platform
+            curl
+            dive
+            docker-compose
+            gcc
+            git
+            httpie
+            jq
+            just
+            kcat
+            lazydocker
+            openssl
+            pkg-config
+            skopeo
+            yq-go
+          ];
+        };
+
+        # --- Packages and Docker Images ---
+        packages = {
+
+          # 1. Custom QuestDB Image
+          questdb-with-healthcheck = pkgs.dockerTools.buildImage {
+            name = "flux-questdb";
+            tag = "7.3.10-custom";
+            fromImage = pkgs.dockerTools.pullImage {
+              imageName = "questdb/questdb";
+              imageDigest = "sha256:2a0408813dee86aa6e0d38f6d4411ea2918c6be3e45f3802f3a11f1e8000635";
+              sha256 = "sha256-V4G+ah+ofZGomsEG1ztWJaQju3P4XbwFemHiNIMAHa4=";
+            };
+            copyToRoot = [ pkgs.curl ];
+          };
+
+          # 2. Operator TUI (Rust)
+          operator-tui-bin = pkgs.rustPlatform.buildRustPackage {
+            pname = "flux-operator-tui";
             version = "0.1.0";
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
@@ -92,7 +132,7 @@
               automake
               libtool
               coreutils
-              which # Add which command
+              which
               findutils
               gawk
               gnused
@@ -100,10 +140,8 @@
 
             # Patch vendor directory scripts
             prePatch = ''
-              # Find and patch all shell and python scripts in vendor directory
               echo "Patching vendor directory for rdkafka-sys..."
               if [ -d "$NIX_BUILD_TOP/cargo-vendor-dir" ]; then
-                # Patch shell scripts
                 find "$NIX_BUILD_TOP/cargo-vendor-dir" -type f \( -name "configure" -o -name "*.sh" \) | while read script; do
                   if [ -f "$script" ]; then
                     echo "Patching shell script: $script"
@@ -149,163 +187,70 @@
             '';
           };
 
-        # Rust Image Builder Function
-        buildRustImage =
-          { pname, bin }:
-          pkgs.dockerTools.buildImage {
-            name = pname;
+          operator-tui = pkgs.dockerTools.buildImage {
+            name = "flux-operator-tui";
             tag = "latest";
-            copyToRoot = [ bin ];
-            config = {
-              Cmd = [ "/bin/${pname}" ];
+            copyToRoot = [ self.packages.${system}.operator-tui-bin ];
+            config.Cmd = [ "/bin/flux-operator-tui" ];
+          };
+
+          # 3. Data Pipeline (Python) - This definition is correct.
+          data-pipeline =
+            let
+              pname = "data-pipeline";
+              pythonApp = pkgs.python311.pkgs.buildPythonApplication {
+                inherit pname;
+                version = "0.1.0";
+                src = ./services/data-pipeline;
+                pyproject = true;
+                nativeBuildInputs = with pkgs.python311.pkgs; [
+                  setuptools
+                  wheel
+                ];
+                propagatedBuildInputs = with pkgs.python311.pkgs; [
+                  orjson
+                  prometheus-client
+                  psycopg
+                  structlog
+                  tenacity
+                  uvloop
+                ];
+              };
+            in
+            pkgs.dockerTools.buildImage {
+              name = "flux-data-pipeline";
+              tag = "latest";
+              copyToRoot = [ pythonApp ];
+              config.Cmd = [ "${pythonApp}/bin/${pname}" ];
             };
-          };
 
-        # Python Image Builder Function
-        buildPythonImage =
-          {
-            pname,
-            src,
-            pythonEnv,
-          }:
-          let
-            pythonApp = pkgs.python311.pkgs.buildPythonApplication {
-              inherit pname src;
-              version = "0.1.0";
-              pyproject = true;
-              nativeBuildInputs = [ pkgs.python311.pkgs.setuptools ];
-              buildInputs = [ pythonEnv ];
+          # 4. KPI Engine (Python) - This definition is correct.
+          kpi-engine =
+            let
+              pname = "kpi-engine";
+              pythonApp = pkgs.python311.pkgs.buildPythonApplication {
+                inherit pname;
+                version = "0.1.0";
+                src = ./services/kpi-engine;
+                pyproject = true;
+                nativeBuildInputs = with pkgs.python311.pkgs; [ hatchling ];
+                propagatedBuildInputs = with pkgs.python311.pkgs; [
+                  aiokafka
+                  click
+                  clickhouse-driver
+                  numpy
+                  pydantic
+                ];
+              };
+            in
+            pkgs.dockerTools.buildImage {
+              name = "flux-kpi-engine";
+              tag = "latest";
+              copyToRoot = [ pythonApp ];
+              config.Cmd = [ "${pythonApp}/bin/${pname}" ];
             };
-          in
-          pkgs.dockerTools.buildImage {
-            name = pname;
-            tag = "latest";
-            copyToRoot = [
-              pkgs.bash
-              pythonApp
-            ];
-            config = {
-              Cmd = [ "${pythonApp}/bin/${pname}" ];
-              WorkingDir = "/";
-              Env = [ "PYTHONUNBUFFERED=1" ];
-            };
-          };
 
-      in
-      {
-        devShells = import ./nix {
-          inherit pkgs rustToolchain;
-          pythonBase = pythonEnv;
-          libsPath = "${pkgs.stdenv.cc.cc.lib}/lib";
-          systemPackages = with pkgs; [
-            btop
-            cmake
-            confluent-platform
-            curl
-            dive
-            docker-compose
-            gcc
-            git
-            httpie
-            jq
-            just
-            kcat
-            lazydocker
-            openssl
-            pkg-config
-            skopeo
-            yq-go
-          ];
-        };
-
-        packages = {
-          questdb-with-healthcheck = pkgs.dockerTools.buildImage {
-            name = "flux-questdb";
-            tag = "7.3.10-custom";
-            fromImage = pkgs.dockerTools.pullImage {
-              imageName = "questdb/questdb";
-              sha256 = "sha256-V4G+ah+ofZGomsEG1ztWJaQju3P4XbwFemHiNIMAHa4=";
-              imageDigest = "sha256:2a0408813dee86aa6e0d38f6d4411ea2918c6be3e45f3802f3a11f1e8000635";
-            };
-            copyToRoot = [ pkgs.curl ];
-          };
-
-          # NOTE: The `src` for all Rust apps is now implicitly `./.` via the `buildRustApp` function
-          operator-tui-bin = buildRustApp {
-            pname = "operator-tui";
-            src = ./apps/operator-tui;
-          };
-          operator-tui = buildRustImage {
-            pname = "operator-tui";
-            bin = self.packages.${system}.operator-tui-bin;
-          };
-
-          # audit-logger-bin = buildRustApp {
-          #   pname = "audit-logger";
-          #   src = ./services/audit-logger;
-          # };
-          # audit-logger = buildRustImage {
-          #   pname = "audit-logger";
-          #   bin = self.packages.${system}.audit-logger-bin;
-          # };
-
-          # control-system-bin = buildRustApp {
-          #   pname = "control-system";
-          #   src = ./services/control-system;
-          # };
-          # control-system = buildRustImage {
-          #   pname = "control-system";
-          #   bin = self.packages.${system}.control-system-bin;
-          # };
-
-          # safety-interlock-bin = buildRustApp {
-          #   pname = "safety-interlock";
-          #   src = ./services/safety-interlock;
-          # };
-          # safety-interlock = buildRustImage {
-          #   pname = "safety-interlock";
-          #   bin = self.packages.${system}.safety-interlock-bin;
-          # };
-
-          # state-manager-bin = buildRustApp {
-          #   pname = "state-manager";
-          #   src = ./services/state-manager;
-          # };
-          # state-manager = buildRustImage {
-          #   pname = "state-manager";
-          #   bin = self.packages.${system}.state-manager-bin;
-          # };
-
-          # alarm-manager = buildPythonImage {
-          #   pname = "alarm-manager";
-          #   src = ./services/alarm-manager;
-          #   pythonEnv = pythonEnv;
-          # };
-
-          data-pipeline = buildPythonImage {
-            pname = "data-pipeline";
-            src = ./services/data-pipeline;
-            pythonEnv = pythonEnvForDataPipeline;
-          };
-
-          # historian = buildPythonImage {
-          #   pname = "historian";
-          #   src = ./services/historian;
-          #   pythonEnv = pythonEnv;
-          # };
-
-          kpi-engine = buildPythonImage {
-            pname = "kpi-engine";
-            src = ./services/kpi-engine;
-            pythonEnv = pythonEnvForKpiEngine;
-          };
-
-          # ml-platform = buildPythonImage {
-          #   pname = "ml-platform";
-          #   src = ./services/ml-platform;
-          #   pythonEnv = pythonEnv;
-          # };
-
+          # 5. Simulator Package
           simulator = pkgs.stdenv.mkDerivation {
             pname = "flux-simulator";
             version = "0.1.0";
@@ -323,24 +268,20 @@
             '';
           };
 
+          # 6. Meta-package to build all Docker images
           all-images = pkgs.buildEnv {
             name = "all-flux-images";
             paths = with self.packages.${system}; [
               questdb-with-healthcheck
               operator-tui
-              # audit-logger
-              # control-system
-              # safety-interlock
-              # state-manager
-              # alarm-manager
               data-pipeline
-              # historian
               kpi-engine
-              # ml-platform
             ];
+            ignoreCollisions = true;
           };
         };
 
+        # --- Runnable Apps ---
         apps = {
           simulator = flake-utils.lib.mkApp { drv = self.packages.${system}.simulator; };
           tui = flake-utils.lib.mkApp { drv = self.packages.${system}.operator-tui-bin; };
