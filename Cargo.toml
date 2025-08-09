@@ -1,11 +1,20 @@
 [workspace]
 members = [
+  # --- Apps ---
   "apps/operator-tui",
-  "lib/flux-*",
-  "services/control-system",
-  "services/safety-interlock",
-  "services/audit-logger",
-  "services/state-manager",
+
+  # --- Lib ---
+  "lib/flux-common",
+  "lib/flux-control",
+  "lib/flux-protocol",
+  "lib/flux-safety",
+  "lib/flux-state",
+
+  # --- Services ---
+  # "services/control-system",
+  # "services/safety-interlock",
+  # "services/audit-logger",
+  # "services/state-manager",
 ]
 
 [workspace.package]

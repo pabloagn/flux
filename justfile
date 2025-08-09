@@ -45,66 +45,68 @@ HISTORIAN_DIR := SERVICES_DIR / "historian"
 KPI_ENGINE_DIR := SERVICES_DIR / "kpi-engine"
 SIMULATOR_DIR := SERVICES_DIR / "simulator"
 
+# --- Docker ---
+COMPOSE_FILES := "-f infra/docker/compose.yml"
+COMPOSE_CMD   := "docker compose {{COMPOSE_FILES}}"
+
 # --- Build Configuration ---
 RUST_BACKTRACE := "1"
 RUST_LOG := "info"
 UV_NO_PROGRESS := "true"
 DOCKER_BUILDKIT := "1"
 
-# --- Recipes ---
+# ═══════════════════════════════════════════════════════════════════════════════
+# Recipes
+# ═══════════════════════════════════════════════════════════════════════════════
+
 # Help
 default:
   @just --list --unsorted
 
-# Nix shells ------------------------------------------------------
+# ─= NIX =───────────────────────────────────────────────────────────────────────
+
 # Enter root dev shell
 shell-default:
 	@nix develop .
 
 # TODO: Add the rest of the devshells here
 
-# Stack lifecycle -------------------------------------------------
-stack-up:
-	@echo "Starting FLUX production stack..."
-	@docker compose \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.base.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.zookeeper.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.kafka.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.nats.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.questdb.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.clickhouse.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.data-pipeline.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.glassflow.yml" \
-	  up -d --build
+# ─= BUILD =─────────────────────────────────────────────────────────────────────
+# Build all custom docker images defined in flake.nix and load them into docker
+build:
+	@echo "Building and loading all FLUX container images via Nix..."
+	@nix build .#all-images --out-link result-images
+	@for image in result-images/*; do \
+	  echo "--> Loading $$image"; \
+	  docker load < $$image; \
+	done
+	@rm result-images
 
-stack-down:
-	@echo "Stopping FLUX production stack..."
-	@docker compose \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.base.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.zookeeper.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.kafka.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.nats.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.questdb.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.clickhouse.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.data-pipeline.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.glassflow.yml" \
-	  down
 
-stack-status:
-	@docker compose \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.base.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.zookeeper.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.kafka.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.nats.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.questdb.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.clickhouse.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.data-pipeline.yml" \
-	  -f "{{INFRA_DIR}}/docker/docker-compose.glassflow.yml" \
-	  ps
+# ─= STACK LIFECYCLE =───────────────────────────────────────────────────────────
+# Start the full development stack (builds images first)
+up: build
+	@echo "Starting FLUX stack..."
+	@{{COMPOSE_CMD}} up -d
 
-stack-restart: stack-down stack-up
+# Stop the stack
+down:
+	@echo "Stopping FLUX stack..."
+	@{{COMPOSE_CMD}} down --remove-orphans
 
-# Kafka -----------------------------------------------------------
+# Show status of all containers
+status:
+	@{{COMPOSE_CMD}} ps
+
+# Restart the entire stack
+restart: down up
+
+# Tail logs for all services, or a specific one
+# Usage: just logs [service-name]
+logs service='':
+	@{{COMPOSE_CMD}} logs -f {{service}}
+
+# ─= KAFKA =───────────────────────────────────────────────────────────────────
 
 # Idempotent creation of required Kafka topics
 topics-create:
@@ -121,7 +123,7 @@ topic-tail topic="flux_electrical_realtime" count="10":
 topics-listen topic="flux_electrical_realtime":
   @kafka-console-consumer --bootstrap-server localhost:9092 --topic {{topic}} --from-beginning --max-messages 5 | jq '.'
 
-# ClickHouse ------------------------------------------------------
+# ─= CLICKHOUSE =────────────────────────────────────────────────────────────────
 
 # Run the init SQL file into ClickHouse
 clickhouse-init: 

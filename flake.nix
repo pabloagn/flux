@@ -21,7 +21,6 @@
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
 
-        # ─────────── Toolchains & common deps ───────────
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [
             "rust-src"
@@ -29,164 +28,246 @@
           ];
         };
 
-        pythonBase = pkgs.python311;
+        pythonEnv = pkgs.python311.withPackages (ps: with ps; [ uv ]);
 
-        systemPackages = with pkgs; [
-          btop
-          clickhouse
-          cmake
-          curl
-          confluent-platform # Provides kafka-console-consumer
-          dive
-          docker-compose
-          gcc
-          git
-          httpie
-          jq
-          just
-          kcat
-          lazydocker
-          openssl
-          pkg-config
-          stdenv.cc.cc.lib
-          uv
-          yq-go
-        ];
+        buildRustApp =
+          { pname, src }:
+          pkgs.rustPlatform.buildRustPackage {
+            inherit pname src;
+            version = "0.1.0";
+            cargoLock.lockFile = ./Cargo.lock;
+            nativeBuildInputs = with pkgs; [ pkg-config ];
+            buildInputs = with pkgs; [ openssl ];
+          };
 
-        # ─────────────── Helper Scripts ────────────────
-        startScript = pkgs.writeShellScriptBin "flux-start" ''
-          FLUX_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-          cd $FLUX_ROOT/infra/docker && docker-compose up -d
-          echo "Waiting for containers…"; sleep 10
-          echo "↳ Kafka      : localhost:9092"
-          echo "↳ ClickHouse : localhost:8123"
-          echo "↳ GlassFlow  : localhost:8080"
-        '';
+        buildRustImage =
+          { pname, bin }:
+          pkgs.dockerTools.buildImage {
+            name = pname;
+            tag = "latest";
+            copyToRoot = [ bin ];
+            config = {
+              Cmd = [ "/bin/${pname}" ];
+            };
+          };
 
-        stopScript = pkgs.writeShellScriptBin "flux-stop" ''
-          FLUX_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-          cd $FLUX_ROOT/infra/docker && docker-compose down
-          echo "Stack stopped."
-        '';
+        buildPythonImage =
+          { pname, src }:
+          let
+            pythonApp = pkgs.python311.pkgs.buildPythonApplication {
+              inherit pname src;
+              version = "0.1.0";
+              pyproject = true;
+              nativeBuildInputs = [ pkgs.python311.pkgs.setuptools ];
+            };
+          in
+          pkgs.dockerTools.buildImage {
+            name = pname;
+            tag = "latest";
+            copyToRoot = [
+              pkgs.bash
+              pythonApp
+            ];
+            config = {
+              Cmd = [ "${pythonApp}/bin/${pname}" ];
+              WorkingDir = "/";
+              Env = [ "PYTHONUNBUFFERED=1" ];
+            };
+          };
 
-        statusScript = pkgs.writeShellScriptBin "flux-status" ''
-          set -euo pipefail
-          FLUX_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-          cyan='\033[36;1m'; green='\033[32;1m'; red='\033[31;1m'; reset='\033[0m'
-          echo -e "''${cyan}── FLUX STACK STATUS ───────────────────────────''${reset}"
-          cd $FLUX_ROOT/infra/docker
-          docker compose ps --format '{{.Name}}\t{{.State}}' |
-          while IFS=$'\t' read -r c state; do
-            printf "%-25s %s\n" "''${c}" \
-              "$( [[ ''${state} =~ running ]] && echo -e "''${green}ONLINE''${reset}" || echo -e "''${red}OFFLINE''${reset}" )"
-          done
-          echo -e "''${cyan}──────────────────────────────────────────────────''${reset}"
-        '';
+        buildNodejsImage =
+          { pname, src }:
+          let
+            nodeApp = pkgs.build-npm-app {
+              inherit pname src;
+              version = "0.1.0";
+              npmDepsHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; # TODO: Replace with `nix-prefetch-npm-deps ./path/to/package-lock.json`
+              buildPhase = ''
+                runHook preBuild
+                npm run build
+                runHook postBuild
+              '';
+              installPhase = ''
+                runHook preInstall
+                mkdir -p $out/
+                cp -r dist/* $out/
+                runHook postInstall
+              '';
+            };
+          in
+          pkgs.dockerTools.buildImage {
+            name = pname;
+            tag = "latest";
+            fromImage = pkgs.dockerTools.pullImage {
+              imageName = "nginx";
+              imageTag = "alpine";
+              sha256 = "sha256-4O5283gC4zQfH0VSHB52Sw2y9O22x2aMCa1r1fIKsV4=";
+            };
+            copyToRoot = [ nodeApp ];
+            config = {
+              Cmd = [
+                "nginx"
+                "-g"
+                "daemon off;"
+              ];
+            };
+          };
 
-        libsPath = "${pkgs.stdenv.cc.cc.lib}/lib:${pkgs.zlib}/lib";
-
-        # ─────────────── Shells ───────────────
-        shells = import ./nix {
-          inherit
-            pkgs
-            rustToolchain
-            pythonBase
-            libsPath
-            systemPackages
-            startScript
-            stopScript
-            statusScript
-            ;
-        };
       in
       {
-        # ─────────────── Development Shells ───────────────
-        # Default shell
-        devShells.default = shells.default;
+        devShells = import ./nix {
+          inherit pkgs rustToolchain;
+          pythonBase = pythonEnv;
+          libsPath = "${pkgs.stdenv.cc.cc.lib}/lib";
+          systemPackages = with pkgs; [
+            btop
+            cmake
+            confluent-platform
+            curl
+            dive
+            docker-compose
+            gcc
+            git
+            httpie
+            jq
+            just
+            kcat
+            lazydocker
+            openssl
+            pkg-config
+            skopeo
+            yq-go
+          ];
+        };
 
-        # Apps & Services
-        devShells.app-tui = shells.app-tui;
-        devShells.srv-kpi = shells.srv-kpi;
-        devShells.srv-sim = shells.srv-sim;
-
-        # ─────────────── Packages ───────────────
         packages = {
-          # Simulator service package
+          questdb-with-healthcheck = pkgs.dockerTools.buildImage {
+            name = "flux-questdb";
+            tag = "7.3.10-custom";
+            fromImage = pkgs.dockerTools.pullImage {
+              imageName = "questdb/questdb";
+              sha256 = "sha256-thn/LQLGkxqAPD/KumugBqj3N5AG7tzeFSHw0uYX95g=";
+              imageDigest = "sha256:2a0408813dee86aa6e0d38f6d4411ea2918c6be34f45f3802f3a11f1e8000635";
+            };
+            runAsRoot = ''
+              #!${pkgs.bash}/bin/bash
+              ${pkgs.dockerTools.shadowSetup}
+              apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+            '';
+          };
+
+          operator-tui-bin = buildRustApp {
+            pname = "operator-tui";
+            src = ./apps/operator-tui;
+          };
+          operator-tui = buildRustImage {
+            pname = "operator-tui";
+            bin = self.packages.${system}.operator-tui-bin;
+          };
+
+          audit-logger-bin = buildRustApp {
+            pname = "audit-logger";
+            src = ./services/audit-logger;
+          };
+          audit-logger = buildRustImage {
+            pname = "audit-logger";
+            bin = self.packages.${system}.audit-logger-bin;
+          };
+
+          control-system-bin = buildRustApp {
+            pname = "control-system";
+            src = ./services/control-system;
+          };
+          control-system = buildRustImage {
+            pname = "control-system";
+            bin = self.packages.${system}.control-system-bin;
+          };
+
+          safety-interlock-bin = buildRustApp {
+            pname = "safety-interlock";
+            src = ./services/safety-interlock;
+          };
+          safety-interlock = buildRustImage {
+            pname = "safety-interlock";
+            bin = self.packages.${system}.safety-interlock-bin;
+          };
+
+          state-manager-bin = buildRustApp {
+            pname = "state-manager";
+            src = ./services/state-manager;
+          };
+
+          state-manager = buildRustImage {
+            pname = "state-manager";
+            bin = self.packages.${system}.state-manager-bin;
+          };
+
+          alarm-manager = buildPythonImage {
+            pname = "alarm-manager";
+            src = ./services/alarm-manager;
+          };
+          data-pipeline = buildPythonImage {
+            pname = "data-pipeline";
+            src = ./services/data-pipeline;
+          };
+          historian = buildPythonImage {
+            pname = "historian";
+            src = ./services/historian;
+          };
+          kpi-engine = buildPythonImage {
+            pname = "kpi-engine";
+            src = ./services/kpi-engine;
+          };
+          ml-platform = buildPythonImage {
+            pname = "ml-platform";
+            src = ./services/ml-platform;
+          };
+
+          web-dashboard = buildNodejsImage {
+            pname = "web-dashboard";
+            src = ./apps/web-dashboard;
+          };
+
           simulator = pkgs.stdenv.mkDerivation {
             pname = "flux-simulator";
             version = "0.1.0";
             src = ./services/simulator;
-            buildInputs = [ pythonBase ];
+            nativeBuildInputs = [ pythonEnv ];
             installPhase = ''
-              mkdir -p $out/{bin,lib}
-              cp -r flux $out/lib
+              mkdir -p $out/bin
+              cp -r flux $out/
               cat > $out/bin/flux-simulator <<EOF
               #!${pkgs.bash}/bin/bash
-              export PYTHONPATH=$out/lib:\$PYTHONPATH
-              ${pythonBase}/bin/python $out/lib/flux/flux.py "\$@"
+              export PYTHONPATH=$out:\$PYTHONPATH
+              ${pythonEnv}/bin/python $out/flux/simulation/plant.py "\$@"
               EOF
               chmod +x $out/bin/flux-simulator
             '';
           };
 
-          # KPI Engine service package
-          kpi-engine = pkgs.stdenv.mkDerivation {
-            pname = "flux-kpi-engine";
-            version = "0.1.0";
-            src = ./services/kpi-engine;
-            buildInputs = [ pythonBase ];
-            installPhase = ''
-              mkdir -p $out/{bin,lib}
-              cp -r src $out/lib
-              cat > $out/bin/flux-kpi <<EOF
-              #!${pkgs.bash}/bin/bash
-              export PYTHONPATH=$out/lib:\$PYTHONPATH
-              ${pythonBase}/bin/python -m $out/lib/__main__.py "\$@"
-              EOF
-              chmod +x $out/bin/flux-kpi
-            '';
-          };
-
-          # Operator TUI application
-          operator-tui = pkgs.rustPlatform.buildRustPackage {
-            pname = "flux-operator-tui";
-            version = "0.1.0";
-            src = ./apps/operator-tui;
-            cargoLock.lockFile = ./apps/operator-tui/Cargo.lock;
-            buildInputs = with pkgs; [
-              openssl
-              pkg-config
+          all-images = pkgs.buildEnv {
+            name = "all-flux-images";
+            paths = with self.packages.${system}; [
+              questdb-with-healthcheck
+              operator-tui
+              audit-logger
+              control-system
+              safety-interlock
+              state-manager
+              alarm-manager
+              data-pipeline
+              historian
+              kpi-engine
+              ml-platform
+              web-dashboard
             ];
-          };
-
-          # Docker images
-          docker-simulator = pkgs.dockerTools.buildImage {
-            name = "flux-simulator";
-            tag = "latest";
-            contents = [ self.packages.${system}.simulator ];
-            config.Cmd = [ "/bin/flux-simulator" ];
-          };
-
-          docker-kpi = pkgs.dockerTools.buildImage {
-            name = "flux-kpi-engine";
-            tag = "latest";
-            contents = [ self.packages.${system}.kpi-engine ];
-            config.Cmd = [ "/bin/flux-kpi" ];
-          };
-
-          docker-tui = pkgs.dockerTools.buildImage {
-            name = "flux-operator-tui";
-            tag = "latest";
-            contents = [ self.packages.${system}.operator-tui ];
-            config.Cmd = [ "/bin/flux-operator-tui" ];
           };
         };
 
-        # ─────────────── Apps ───────────────
         apps = {
           simulator = flake-utils.lib.mkApp { drv = self.packages.${system}.simulator; };
-          kpi = flake-utils.lib.mkApp { drv = self.packages.${system}.kpi-engine; };
-          tui = flake-utils.lib.mkApp { drv = self.packages.${system}.operator-tui; };
+          tui = flake-utils.lib.mkApp { drv = self.packages.${system}.operator-tui-bin; };
+          default = self.apps.${system}.tui;
         };
       }
     );

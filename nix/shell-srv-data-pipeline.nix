@@ -2,10 +2,6 @@
   pkgs,
   pythonBase,
   systemPackages,
-  startScript,
-  stopScript,
-  statusScript,
-  ...
 }:
 
 pkgs.mkShell {
@@ -18,9 +14,6 @@ pkgs.mkShell {
     ]
     ++ systemPackages
     ++ [
-      startScript
-      stopScript
-      statusScript
     ];
 
   shellHook = ''

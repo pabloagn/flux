@@ -4,9 +4,6 @@
   pythonBase,
   libsPath,
   systemPackages,
-  startScript,
-  stopScript,
-  statusScript,
 }:
 
 pkgs.mkShell {
@@ -15,9 +12,6 @@ pkgs.mkShell {
   buildInputs = systemPackages ++ [
     pythonBase
     rustToolchain
-    startScript
-    stopScript
-    statusScript
   ];
   shellHook = ''
     export LD_LIBRARY_PATH='${libsPath}':$LD_LIBRARY_PATH

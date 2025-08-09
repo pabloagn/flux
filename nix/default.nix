@@ -4,12 +4,9 @@
   pythonBase,
   libsPath,
   systemPackages,
-  startScript,
-  stopScript,
-  statusScript,
 }:
 {
-  # Default shell
+  # --- Default Shell ---
   default = import ./shell-default.nix {
     inherit
       pkgs
@@ -17,22 +14,16 @@
       pythonBase
       libsPath
       systemPackages
-      startScript
-      stopScript
-      statusScript
       ;
   };
 
-  # Application shells
+  # --- Application Shells ---
   app-tui = import ./shell-app-tui.nix {
     inherit
       pkgs
       rustToolchain
       libsPath
       systemPackages
-      startScript
-      stopScript
-      statusScript
       ;
   };
 
@@ -41,22 +32,16 @@
       pkgs
       libsPath
       systemPackages
-      startScript
-      stopScript
-      statusScript
       ;
   };
 
-  # Service shells
+  # --- Service Shells ---
   srv-sim = import ./shell-srv-sim.nix {
     inherit
       pkgs
       pythonBase
       libsPath
       systemPackages
-      startScript
-      stopScript
-      statusScript
       ;
   };
 
@@ -66,9 +51,6 @@
       pythonBase
       libsPath
       systemPackages
-      startScript
-      stopScript
-      statusScript
       ;
   };
 
@@ -77,9 +59,6 @@
       pkgs
       pythonBase
       systemPackages
-      startScript
-      stopScript
-      statusScript
       ;
   };
 }

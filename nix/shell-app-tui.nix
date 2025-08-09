@@ -3,9 +3,6 @@
   rustToolchain,
   libsPath,
   systemPackages,
-  startScript,
-  stopScript,
-  statusScript,
 }:
 
 pkgs.mkShell {
@@ -13,9 +10,6 @@ pkgs.mkShell {
 
   buildInputs = systemPackages ++ [
     rustToolchain
-    startScript
-    stopScript
-    statusScript
   ];
 
   shellHook = ''

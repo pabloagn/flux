@@ -1,0 +1,163 @@
+#
+# ┌──────────────────────────────────────────────────────────────────┐
+# │                    FLUX CORE STACK DEFINITION                    │
+# ├──────────────────────────────────────────────────────────────────┤
+# │ This is the single source of truth for the local development     │
+# │ environment. It orchestrates all infrastructure and application  │
+# │ services required to run the FLUX platform.                      │
+# │                                                                  │
+# │ CRITICAL: All custom application services (e.g., data-pipeline)  │
+# │ reference images that MUST be built via the Nix flake first.     │
+# │ There are no 'build:' contexts here. This is by design for       │
+# │ maximum reproducibility.                                         │
+# │                                                                  │
+# │ Usage:                                                           │
+# │   - Build images: `just build`                                   │
+# │   - Start stack:  `just up`                                      │
+# │   - Stop stack:   `just down`                                    │
+# └──────────────────────────────────────────────────────────────────┘
+#
+
+# ─= Networks =───────────────────────────────────────────────────────
+networks:
+  flux-net:
+    name: flux-net
+    driver: bridge
+
+# ─= Named Volumes =──────────────────────────────────────────────────
+volumes:
+  flux-questdb-data:
+  flux-zookeeper-data:
+  flux-kafka-data:
+
+# ─= Services =───────────────────────────────────────────────────────
+services:
+  #  --- Core Infrastructure: Messaging & Data Persistence ---
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.3
+    container_name: flux-zookeeper
+    networks: [flux-net]
+    ports:
+      - "2181:2181"
+    volumes:
+      - flux-zookeeper-data:/var/lib/zookeeper/data
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.3
+    container_name: flux-kafka
+    networks: [flux-net]
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    volumes:
+      - flux-kafka-data:/var/lib/kafka/data
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
+  nats:
+    image: nats:2.10-alpine
+    container_name: flux-nats
+    networks: [flux-net]
+    ports:
+      - "4222:4222" # Client port
+      - "8222:8222" # HTTP monitoring port
+    command: ["-js"] # Enable JetStream for persistence and streaming
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: flux-clickhouse
+    networks: [flux-net]
+    ports:
+      - "8123:8123" # HTTP
+      - "9001:9000" # Native TCP
+    volumes:
+      - ../../config/schemas/clickhouse:/docker-entrypoint-initdb.d
+    environment:
+      CLICKHOUSE_DB: flux
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+
+  questdb:
+    # NOTE: This custom image is built by `flake.nix` to include `curl`.
+    image: flux-questdb:7.3.10-custom
+    container_name: flux-questdb
+    networks: [flux-net]
+    ports:
+      - "9000:9000" # HTTP API & Web Console
+      - "8812:8812" # PostgreSQL wire protocol
+      - "9009:9009" # InfluxDB line protocol (TCP)
+    volumes:
+      - flux-questdb-data:/var/lib/questdb
+      - ../../config/questdb/questdb.conf:/etc/questdb/server.conf:ro
+      - ../../config/schemas/questdb/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    environment:
+      - QDB_TELEMETRY_ENABLED=false
+      - JAVA_OPTS=-Xms4g -Xmx8g -XX:+UseG1GC
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/exec?query=select%201"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    # NOTE:
+    # The 'deploy' key is for Docker Swarm. For local compose, it's informational.
+    # We leave it here as a reference for resource requirements.
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 8G
+        reservations:
+          cpus: "2"
+          memory: 4G
+
+  #  --- Stream Processing & Application Services ---
+  glassflow:
+    image: glassflow/clickhouse-etl-be:stable
+    container_name: flux-glassflow
+    networks: [flux-net]
+    ports:
+      - "8080:8080"
+    depends_on:
+      - kafka
+      - clickhouse
+      - nats
+    environment:
+      - GLASSFLOW_LOG_FILE_PATH=/tmp/logs/glassflow
+      - GLASSFLOW_NATS_SERVER=nats:4222
+
+  data-pipeline:
+    image: flux-data-pipeline:latest
+    container_name: flux-data-pipeline
+    networks: [flux-net]
+    depends_on:
+      kafka:
+        condition: service_started
+      questdb:
+        condition: service_healthy
+    restart: unless-stopped
+    environment:
+      - KAFKA_BROKERS=kafka:9093 # Use the internal listener for container-to-container communication
+      - QUESTDB_HOST=questdb
+      - QUESTDB_PORT=8812
+      - PYTHONUNBUFFERED=1
+    # NOTE: The 'deploy' key is informational for local Compose.
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G

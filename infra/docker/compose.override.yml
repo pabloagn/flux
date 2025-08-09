@@ -1,0 +1,16 @@
+# NOTE: This file is for local development and should be in .gitignore
+version: "3.8"
+
+services:
+  data-pipeline:
+    # Mount the source code for live-reloading during development
+    volumes:
+      - ../../services/data-pipeline/src:/app/src
+    # Add debug ports or other dev-only settings
+    ports:
+      - "8000:8000"
+
+  # NOTE: Add overrides for other services we're actively developing
+  # kpi-engine:
+  #   volumes:
+  #     - ../../services/kpi-engine/src:/app/src
