@@ -1,5 +1,6 @@
 use crate::app::{App, CellData, ViewMode};
 use ratatui::{prelude::*, symbols, widgets::*};
+use crate::config::FluxConfig;
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let main_layout = Layout::default()
@@ -175,7 +176,7 @@ fn render_unit_display(f: &mut Frame, area: Rect, app: &mut App, unit_id: u8) {
             }
             let key = format!("U{unit_id}_S{stack_id}_C{cell_id:02}");
             let (glyph, color) = match app.cells.get(&key) {
-                Some(cd) => get_cell_display(cd),
+                Some(cd) => get_cell_display(cd, &app.cfg),
                 None => ('·', Color::DarkGray),
             };
             let is_cell_selected =
@@ -254,15 +255,15 @@ fn render_horizontal_scrollbar(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(Paragraph::new(Line::from(spans)), inner);
 }
 
-fn get_cell_display(cell: &CellData) -> (char, Color) {
+fn get_cell_display(cell: &CellData, config: &FluxConfig) -> (char, Color) {
     if cell.sensor_quality < 0.9 {
         ('?', Color::Magenta) // Sensor fault
-    } else if cell.voltage > app.cfg.limits.critical.voltage_v
-        || cell.temperature > app.cfg.limits.critical.temperature_c
+    } else if cell.voltage > config.limits.critical.voltage_v
+        || cell.temperature > config.limits.critical.temperature_c
     {
         ('█', Color::Red) // Critical
-    } else if cell.voltage > app.cfg.limits.warning.voltage_v
-        || cell.temperature > app.cfg.limits.warning.temperature_c
+    } else if cell.voltage > config.limits.warning.voltage_v
+        || cell.temperature > config.limits.warning.temperature_c
     {
         ('▓', Color::Yellow) // Warning
     } else if cell.efficiency < 92.0 {
@@ -316,7 +317,7 @@ fn render_selection_details(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(block, area);
 
     let text = if let Some(cell) = app.get_selected_cell_data() {
-        let (glyph, color) = get_cell_display(cell);
+        let (glyph, color) = get_cell_display(cell, &app.cfg);
 
         let status_text = if cell.sensor_quality < 0.9 {
             "SENSOR FAULT"

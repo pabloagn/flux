@@ -150,9 +150,12 @@ services:
         condition: service_healthy
     restart: unless-stopped
     environment:
-      - KAFKA_BROKERS=kafka:9093 # Use the internal listener for container-to-container communication
+      - KAFKA_BROKERS=kafka:9093
       - QUESTDB_HOST=questdb
       - QUESTDB_PORT=8812
+      - QUESTDB_USER=flux_operator
+      - QUESTDB_PASSWORD=flux_questdb_2024
+      - KAFKA_TOPICS=flux.cell.metrics.v1
       - PYTHONUNBUFFERED=1
     # NOTE: The 'deploy' key is informational for local Compose.
     deploy:

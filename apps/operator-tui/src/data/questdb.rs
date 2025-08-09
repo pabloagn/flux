@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use deadpool_postgres::{Config, Manager, ManagerConfig, Pool, RecyclingMethod, Runtime};
+use deadpool_postgres::tokio_postgres::{NoTls, Row};
+use deadpool_postgres::{Config, ManagerConfig, Pool, RecyclingMethod, Runtime};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tokio_postgres::{NoTls, Row};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CellMetric {

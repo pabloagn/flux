@@ -82,6 +82,14 @@ build:
 	done
 	@rm result-images
 
+# ─= DEV =───────────────────────────────────────────────────────────────────────
+dev-tui:
+  @echo "Building and running TUI (dev mode)..."
+  @cargo run -p flux-operator-tui
+
+release-tui:
+	@echo "Building and running TUI (release mode)..."
+	cargo run -p flux-operator-tui --release
 
 # ─= STACK LIFECYCLE =───────────────────────────────────────────────────────────
 # Start the full development stack (builds images first)

@@ -1,5 +1,7 @@
 use clickhouse::{Client, Row};
+use clickhouse::error::Result;
 use serde::Deserialize;
+use chrono::{DateTime, Utc};
 
 #[derive(Debug, Row, Deserialize)]
 pub struct CellMetrics {
