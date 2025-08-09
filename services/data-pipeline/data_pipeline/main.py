@@ -12,7 +12,7 @@ from aiokafka import AIOKafkaConsumer
 from prometheus_client import Counter, Histogram, start_http_server
 
 # Import our specialized writer and its data model
-from .questdb_writer import CellMetric, QuestDBWriter
+from data_pipeline.questdb_writer import CellMetric, QuestDBWriter
 
 # Performance optimization
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())

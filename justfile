@@ -46,8 +46,7 @@ KPI_ENGINE_DIR := SERVICES_DIR / "kpi-engine"
 SIMULATOR_DIR := SERVICES_DIR / "simulator"
 
 # --- Docker ---
-COMPOSE_FILES := "-f infra/docker/compose.yml"
-COMPOSE_CMD   := "docker compose {{COMPOSE_FILES}}"
+COMPOSE_CMD := "docker compose -f infra/docker/compose.yml"
 
 # --- Build Configuration ---
 RUST_BACKTRACE := "1"
@@ -76,11 +75,19 @@ shell-default:
 build:
 	@echo "Building and loading all FLUX container images via Nix..."
 	@nix build .#all-images --out-link result-images
-	@for image in result-images/*; do \
-	  echo "--> Loading $$image"; \
-	  docker load < $$image; \
-	done
-	@rm result-images
+
+load:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	echo "--> Loading questdb image"
+	docker load < $(nix build .#questdb-with-healthcheck --print-out-paths --no-link)
+	echo "--> Loading operator-tui image"
+	docker load < $(nix build .#operator-tui --print-out-paths --no-link)
+	echo "--> Loading data-pipeline image"
+	docker load < $(nix build .#data-pipeline --print-out-paths --no-link)
+	echo "--> Loading kpi-engine image"
+	docker load < $(nix build .#kpi-engine --print-out-paths --no-link)
+	echo "All images loaded successfully!"
 
 # ─= DEV =───────────────────────────────────────────────────────────────────────
 dev-tui:
@@ -93,7 +100,7 @@ release-tui:
 
 # ─= STACK LIFECYCLE =───────────────────────────────────────────────────────────
 # Start the full development stack (builds images first)
-up: build
+up:
 	@echo "Starting FLUX stack..."
 	@{{COMPOSE_CMD}} up -d
 
@@ -113,6 +120,9 @@ restart: down up
 # Usage: just logs [service-name]
 logs service='':
 	@{{COMPOSE_CMD}} logs -f {{service}}
+
+stats:
+	@docker stats
 
 # ─= KAFKA =───────────────────────────────────────────────────────────────────
 

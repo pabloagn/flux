@@ -29,7 +29,7 @@
           ];
         };
 
-        # ... (Python environments remain the same)
+        # --- Python Environments ---
         pythonEnv = pkgs.python311.withPackages (
           ps: with ps; [
             hatchling
@@ -91,7 +91,7 @@
         # --- Packages and Docker Images ---
         packages = {
 
-          # 1. Custom QuestDB Image
+          # --- Custom Questdb Image ---
           questdb-with-healthcheck = pkgs.dockerTools.buildImage {
             name = "flux-questdb";
             tag = "7.3.10-custom";
@@ -101,9 +101,26 @@
               sha256 = "sha256-V4G+ah+ofZGomsEG1ztWJaQju3P4XbwFemHiNIMAHa4=";
             };
             copyToRoot = [ pkgs.curl ];
+            config = {
+              Entrypoint = [ "/app/bin/java" ];
+              Cmd = [
+                "-m"
+                "io.questdb/io.questdb.ServerMain"
+                "-d"
+                "/var/lib/questdb"
+                "-c"
+                "/etc/questdb/server.conf"
+              ];
+              WorkingDir = "/var/lib/questdb";
+              ExposedPorts = {
+                "9000/tcp" = { };
+                "8812/tcp" = { };
+                "9009/tcp" = { };
+              };
+            };
           };
 
-          # 2. Operator TUI (Rust)
+          # --- Operator TUI ---
           operator-tui-bin = pkgs.rustPlatform.buildRustPackage {
             pname = "flux-operator-tui";
             version = "0.1.0";
@@ -194,7 +211,7 @@
             config.Cmd = [ "/bin/flux-operator-tui" ];
           };
 
-          # 3. Data Pipeline (Python) - This definition is correct.
+          # --- Data Pipeline (python) - This Definition Is Correct. ---
           data-pipeline =
             let
               pname = "data-pipeline";
@@ -208,20 +225,23 @@
                   wheel
                 ];
                 propagatedBuildInputs = with pkgs.python311.pkgs; [
+                  aiokafka
                   orjson
                   prometheus-client
                   psycopg
+                  pydantic
                   structlog
                   tenacity
                   uvloop
                 ];
+                pythonImportsCheck = [ "data_pipeline" ];
               };
             in
             pkgs.dockerTools.buildImage {
               name = "flux-data-pipeline";
               tag = "latest";
               copyToRoot = [ pythonApp ];
-              config.Cmd = [ "${pythonApp}/bin/${pname}" ];
+              config.Cmd = [ "/bin/data-pipeline" ];
             };
 
           # 4. KPI Engine (Python) - This definition is correct.
@@ -269,15 +289,24 @@
           };
 
           # 6. Meta-package to build all Docker images
-          all-images = pkgs.buildEnv {
+          all-images = pkgs.stdenv.mkDerivation {
             name = "all-flux-images";
-            paths = with self.packages.${system}; [
-              questdb-with-healthcheck
-              operator-tui
-              data-pipeline
-              kpi-engine
-            ];
-            ignoreCollisions = true;
+
+            # Don't use buildInputs for docker images!
+            # buildInputs is for build dependencies like compilers, libraries, etc.
+
+            phases = [ "installPhase" ];
+
+            installPhase = ''
+              mkdir -p $out
+
+              # Just reference the images in the derivation to ensure they're built
+              echo "All Docker images built:" > $out/images.txt
+              echo "questdb: ${self.packages.${system}.questdb-with-healthcheck}" >> $out/images.txt
+              echo "operator-tui: ${self.packages.${system}.operator-tui}" >> $out/images.txt
+              echo "data-pipeline: ${self.packages.${system}.data-pipeline}" >> $out/images.txt
+              echo "kpi-engine: ${self.packages.${system}.kpi-engine}" >> $out/images.txt
+            '';
           };
         };
 

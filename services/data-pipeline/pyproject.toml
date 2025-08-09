@@ -3,9 +3,7 @@ name = "flux-data-pipeline"
 version = "0.1.0"
 description = "High-performance data pipeline for FLUX platform"
 dependencies = [
-  "asyncio>=3.4.3",
   "aiokafka>=0.10.0",
-  "questdb>=2.0.0",
   "psycopg[binary,pool]>=3.1.18",
   "pydantic>=2.5.0",
   "structlog>=24.1.0",
@@ -18,3 +16,9 @@ dependencies = [
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project.scripts]
+data-pipeline = "data_pipeline.main:main"
+
+[tool.setuptools]
+packages = ["data_pipeline"]
