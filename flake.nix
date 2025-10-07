@@ -92,33 +92,61 @@
         packages = {
 
           # --- Custom Questdb Image ---
-          questdb-with-healthcheck = pkgs.dockerTools.buildImage {
-            name = "flux-questdb";
-            tag = "7.3.10-custom";
-            fromImage = pkgs.dockerTools.pullImage {
-              imageName = "questdb/questdb";
-              imageDigest = "sha256:2a0408813dee86aa6e0d38f6d4411ea2918c6be3e45f3802f3a11f1e8000635";
-              sha256 = "sha256-V4G+ah+ofZGomsEG1ztWJaQju3P4XbwFemHiNIMAHa4=";
-            };
-            copyToRoot = [ pkgs.curl ];
-            config = {
-              Entrypoint = [ "/app/bin/java" ];
-              Cmd = [
-                "-m"
-                "io.questdb/io.questdb.ServerMain"
-                "-d"
-                "/var/lib/questdb"
-                "-c"
-                "/etc/questdb/server.conf"
+          questdb-with-healthcheck =
+            let
+              entrypointScript = pkgs.writeShellScriptBin "questdb-entrypoint" ''
+                #!${pkgs.bash}/bin/bash
+                set -euo pipefail
+                /app/bin/java -m io.questdb/io.questdb.ServerMain -d /var/lib/questdb &
+                QDB_PID=$!
+                echo "--> Waiting for QuestDB to become available..."
+                while ! ${pkgs.postgresql}/bin/pg_isready -h localhost -p 8812 -q -U admin; do
+                  sleep 1
+                done
+                echo "--> QuestDB is ready."
+                INIT_SCRIPT="/docker-entrypoint-initdb.d/init.sql"
+                if [ -f "$INIT_SCRIPT" ]; then
+                  echo "--> Found initialization script, executing: $INIT_SCRIPT"
+                  PGPASSWORD=quest ${pkgs.postgresql}/bin/psql \
+                    -h localhost \
+                    -p 8812 \
+                    -U admin \
+                    -d qdb \
+                    -v ON_ERROR_STOP=1 \
+                    -a \
+                    -f "$INIT_SCRIPT"
+                  echo "--> Initialization script finished."
+                else
+                  echo "--> No initialization script found."
+                fi
+                wait $QDB_PID
+              '';
+            in
+            pkgs.dockerTools.buildImage {
+              name = "flux-questdb";
+              tag = "7.3.10-custom";
+              fromImage = pkgs.dockerTools.pullImage {
+                imageName = "questdb/questdb";
+                imageDigest = "sha256:2a0408813dee86aa6e0d38f6d4411ea2918c6be3e45f3802f3a11f1e8000635b";
+                sha256 = "sha256-V4G+ah+ofZGomsEG1ztWJaQju3P4XbwFemHiNIMAHa4=";
+              };
+
+              copyToRoot = with pkgs; [
+                curl
+                postgresql
               ];
-              WorkingDir = "/var/lib/questdb";
-              ExposedPorts = {
-                "9000/tcp" = { };
-                "8812/tcp" = { };
-                "9009/tcp" = { };
+
+              config = {
+                Entrypoint = [ "${entrypointScript}/bin/questdb-entrypoint" ];
+                Cmd = [ ];
+                WorkingDir = "/var/lib/questdb";
+                ExposedPorts = {
+                  "9000/tcp" = { };
+                  "8812/tcp" = { };
+                  "9009/tcp" = { };
+                };
               };
             };
-          };
 
           # --- Operator TUI ---
           operator-tui-bin = pkgs.rustPlatform.buildRustPackage {
@@ -211,7 +239,7 @@
             config.Cmd = [ "/bin/flux-operator-tui" ];
           };
 
-          # --- Data Pipeline (python) - This Definition Is Correct. ---
+          # --- Data Pipeline ---
           data-pipeline =
             let
               pname = "data-pipeline";
@@ -229,6 +257,7 @@
                   orjson
                   prometheus-client
                   psycopg
+                  psycopg-pool
                   pydantic
                   structlog
                   tenacity
@@ -244,7 +273,7 @@
               config.Cmd = [ "/bin/data-pipeline" ];
             };
 
-          # 4. KPI Engine (Python) - This definition is correct.
+          # KPI Engine
           kpi-engine =
             let
               pname = "kpi-engine";

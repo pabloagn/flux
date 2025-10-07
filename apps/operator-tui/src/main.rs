@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
 
     // Initialize QuestDB client
     let questdb = Arc::new(
-        QuestDBClient::new("localhost", 8812, "flux_operator", "flux_questdb_2024").await?,
+        QuestDBClient::new("localhost", 8812, "admin", "quest").await?,
     );
 
     // Create app with QuestDB client

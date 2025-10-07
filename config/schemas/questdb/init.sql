@@ -1,6 +1,19 @@
 -- QuestDB Schema for FLUX Real-Time Data
 
--- Cell-level measurements (high frequency)
+-- =================================================================
+-- USER MANAGEMENT AND PERMISSIONS
+-- =================================================================
+
+-- Create the user that the data-pipeline will use to write data.
+-- NOTE: The password MUST match the one in docker-compose.yml.
+-- NOTE: QuestDB user creation is an enterprise feature
+-- CREATE USER flux_operator WITH PASSWORD 'flux_questdb_2024';
+-- GRANT CONNECT ON DATABASE qdb TO flux_operator;
+-- GRANT INSERT ON TABLE cell_metrics TO flux_operator;
+
+-- =================================================================
+-- Cell-level Measurements (high Frequency)
+-- =================================================================
 CREATE TABLE IF NOT EXISTS cell_metrics (
     ts TIMESTAMP,
     unit_id INT,
@@ -17,7 +30,9 @@ CREATE TABLE IF NOT EXISTS cell_metrics (
     sensor_quality DOUBLE
 ) TIMESTAMP(ts) PARTITION BY DAY WAL DEDUP UPSERT KEYS(ts, unit_id, stack_id, cell_id);
 
+-- =================================================================
 -- Electrolyzer unit aggregates
+-- =================================================================
 CREATE TABLE IF NOT EXISTS unit_metrics (
     ts TIMESTAMP,
     unit_id INT,
@@ -33,7 +48,9 @@ CREATE TABLE IF NOT EXISTS unit_metrics (
     brine_concentration_g_l DOUBLE
 ) TIMESTAMP(ts) PARTITION BY DAY WAL DEDUP UPSERT KEYS(ts, unit_id);
 
+-- =================================================================
 -- Control commands audit trail
+-- =================================================================
 CREATE TABLE IF NOT EXISTS control_commands (
     ts TIMESTAMP,
     command_id SYMBOL,
@@ -48,7 +65,9 @@ CREATE TABLE IF NOT EXISTS control_commands (
     execution_time_ms LONG
 ) TIMESTAMP(ts) PARTITION BY DAY;
 
+-- =================================================================
 -- Alarm events
+-- =================================================================
 CREATE TABLE IF NOT EXISTS alarm_events (
     ts TIMESTAMP,
     alarm_id SYMBOL,
@@ -65,7 +84,9 @@ CREATE TABLE IF NOT EXISTS alarm_events (
     ack_ts TIMESTAMP
 ) TIMESTAMP(ts) PARTITION BY DAY;
 
--- Plant state snapshot (for recovery)
+-- =================================================================
+-- Plant state snapshot (recovery)
+-- =================================================================
 CREATE TABLE IF NOT EXISTS plant_state (
     ts TIMESTAMP,
     state_json STRING,

@@ -23,7 +23,7 @@ async def kafka_producer():
 async def questdb_connection():
     """Create QuestDB connection"""
     conn = await psycopg.AsyncConnection.connect(
-        "host=localhost port=8812 dbname=qdb user=flux_operator password=flux_questdb_2024"
+        "host=localhost port=8812 dbname=qdb user=admin password=quest"
     )
     yield conn
     await conn.close()

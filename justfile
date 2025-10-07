@@ -141,6 +141,10 @@ topic-tail topic="flux_electrical_realtime" count="10":
 topics-listen topic="flux_electrical_realtime":
   @kafka-console-consumer --bootstrap-server localhost:9092 --topic {{topic}} --from-beginning --max-messages 5 | jq '.'
 
+# ─= QuestDB =───────────────────────────────────────────────────────────────────
+questdb-clean:
+  @docker volume rm flux-questdb-data
+
 # ─= CLICKHOUSE =────────────────────────────────────────────────────────────────
 
 # Run the init SQL file into ClickHouse

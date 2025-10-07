@@ -3,24 +3,21 @@ import os
 import signal
 import sys
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import List
 
 import orjson
 import structlog
 import uvloop
 from aiokafka import AIOKafkaConsumer
+from aiokafka.errors import KafkaConnectionError
 from prometheus_client import Counter, Histogram, start_http_server
+from tenacity import retry, stop_after_attempt, wait_exponential
 
-# Import our specialized writer and its data model
 from data_pipeline.questdb_writer import CellMetric, QuestDBWriter
 
-# Performance optimization
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-
-# Structured logging
 logger = structlog.get_logger(__name__)
 
-# Metrics
 MESSAGES_PROCESSED = Counter("questdb_messages_processed_total", "Total messages processed")
 MESSAGES_FAILED = Counter("questdb_messages_failed_total", "Total messages failed to process")
 BATCH_WRITE_SUCCESS = Counter("questdb_batch_write_success_total", "Batches successfully written")
@@ -30,19 +27,17 @@ WRITE_LATENCY = Histogram("questdb_write_latency_seconds", "Write latency")
 
 
 class KafkaToQuestDB:
-    """The main application: orchestrates consuming from Kafka and writing to QuestDB."""
-
     def __init__(
         self,
         kafka_brokers: str,
-        kafka_topic: str,
+        kafka_topics: List[str],
         kafka_group: str,
         writer: QuestDBWriter,
         batch_size: int,
         batch_timeout_ms: int,
     ):
         self.kafka_brokers = kafka_brokers
-        self.kafka_topics = kafka_topic
+        self.kafka_topics = kafka_topics
         self.kafka_group = kafka_group
         self.writer = writer
         self.batch_size = batch_size
@@ -52,9 +47,17 @@ class KafkaToQuestDB:
         self.consumer: AIOKafkaConsumer | None = None
         self.running = False
 
+    @retry(
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        stop=stop_after_attempt(5),
+        retry_error_callback=lambda _: logger.critical("Failed to connect to Kafka after multiple retries."),
+    )
     async def start(self):
-        """Start the writer's connection pool and the Kafka consumer."""
-        await self.writer.connect()
+        logger.info("Attempting to connect to QuestDB...")
+        await self.writer.open()
+        logger.info("QuestDB connection pool opened.")
+
+        logger.info("Attempting to connect to Kafka...", brokers=self.kafka_brokers)
         self.consumer = AIOKafkaConsumer(
             *self.kafka_topics,
             bootstrap_servers=self.kafka_brokers,
@@ -69,7 +72,6 @@ class KafkaToQuestDB:
         logger.info("Kafka consumer started", topics=self.kafka_topics)
 
     async def stop(self):
-        """Stop the consumer and gracefully flush any remaining data."""
         self.running = False
         if self.consumer:
             await self.consumer.stop()
@@ -94,22 +96,19 @@ class KafkaToQuestDB:
         except Exception as e:
             BATCH_WRITE_FAILED.inc()
             logger.error("Failed to write batch to QuestDB", error=str(e), batch_size=len(batch_to_write))
-            # In a real-world scenario, you would add these failed messages to a dead-letter queue.
 
     async def flush(self):
-        """Public method to flush the current batch."""
         await self._flush_internal()
 
     async def add_metric_and_flush_if_needed(self, metric: CellMetric):
-        """Add a metric and trigger a flush if the batch is full or a timeout is reached."""
         self.batch.append(metric)
         now = asyncio.get_event_loop().time()
         if len(self.batch) >= self.batch_size or (now - self.last_flush) * 1000 >= self.batch_timeout_ms:
             await self._flush_internal()
-            await self.consumer.commit()  # Commit offsets after a successful flush
+            if self.consumer:
+                await self.consumer.commit()
 
     async def run(self):
-        """The main processing loop."""
         flush_task = asyncio.create_task(self.periodic_flush())
         try:
             async for msg in self.consumer:
@@ -127,17 +126,16 @@ class KafkaToQuestDB:
         finally:
             flush_task.cancel()
             await self.flush()
-            await self.consumer.commit()
+            if self.consumer:
+                await self.consumer.commit()
 
     async def periodic_flush(self):
-        """A background task to ensure data is flushed periodically even with low message volume."""
         while self.running:
             await asyncio.sleep(self.batch_timeout_ms / 1000)
             await self.flush()
 
 
 async def shutdown(sig, loop, pipeline: KafkaToQuestDB):
-    """Graceful shutdown handler."""
     logger.info(f"Received exit signal {sig.name}...")
     await pipeline.stop()
     tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
@@ -147,19 +145,18 @@ async def shutdown(sig, loop, pipeline: KafkaToQuestDB):
     loop.stop()
 
 
-async def main():
-    """Main entry point: Read config, create objects, and run the pipeline."""
+async def async_main():
     kafka_brokers = os.environ["KAFKA_BROKERS"]
     questdb_host = os.environ["QUESTDB_HOST"]
     questdb_port = int(os.environ["QUESTDB_PORT"])
     questdb_user = os.environ["QUESTDB_USER"]
     questdb_password = os.environ["QUESTDB_PASSWORD"]
     questdb_db = os.getenv("QUESTDB_DB", "qdb")
-    kafka_topic = os.environ["KAFKA_TOPICS"]
+    kafka_topics_str = os.environ.get("KAFKA_TOPICS", "flux.cell.metrics.v1")
+    kafka_topics = [topic.strip() for topic in kafka_topics_str.split(",")]
 
     start_http_server(8000)
 
-    # 1. Create the specialized writer component with its config
     writer = QuestDBWriter(
         host=questdb_host,
         port=questdb_port,
@@ -168,31 +165,31 @@ async def main():
         password=questdb_password,
     )
 
-    # 2. Create the main pipeline application, injecting the writer
     pipeline = KafkaToQuestDB(
         kafka_brokers=kafka_brokers,
-        kafka_topic=kafka_topic,
+        kafka_topics=kafka_topics,
         kafka_group="questdb-writer-group",
         writer=writer,
         batch_size=10000,
         batch_timeout_ms=100,
     )
 
-    # 3. Set up signal handling for graceful shutdown
     loop = asyncio.get_event_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s, loop, pipeline)))
 
-    # 4. Run the application
     try:
         await pipeline.start()
         await pipeline.run()
+    except KafkaConnectionError as e:
+        logger.critical("Could not connect to Kafka", error=str(e))
+        sys.exit(1)
     except Exception as e:
         logger.critical("Pipeline failed with unhandled exception", error=str(e))
         sys.exit(1)
 
 
-if __name__ == "__main__":
+def main():
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
@@ -201,4 +198,11 @@ if __name__ == "__main__":
             structlog.processors.JSONRenderer(),
         ]
     )
-    asyncio.run(main())
+    try:
+        asyncio.run(async_main())
+    except KeyboardInterrupt:
+        logger.info("Shutdown requested by user.")
+
+
+if __name__ == "__main__":
+    main()

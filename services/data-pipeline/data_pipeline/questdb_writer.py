@@ -6,15 +6,13 @@ from typing import List, Optional
 
 import structlog
 from pydantic import BaseModel, Field
-from psycopg.pool import AsyncConnectionPool
+from psycopg_pool import AsyncConnectionPool
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = structlog.get_logger(__name__)
 
 
 class CellMetric(BaseModel):
-    """Cell measurement data model. This defines the data contract for the writer."""
-
     ts: datetime
     unit_id: int = Field(ge=1, le=3)
     stack_id: str = Field(pattern=r"^[A-C]$")
@@ -31,8 +29,6 @@ class CellMetric(BaseModel):
 
 
 class QuestDBWriter:
-    """High-performance QuestDB writer with connection pooling."""
-
     def __init__(
         self,
         host: str,
@@ -54,20 +50,19 @@ class QuestDBWriter:
             timeout=30,
             max_lifetime=600,
             max_idle=300,
+            open=False,
         )
 
-    async def connect(self):
-        """Initialize and wait for the connection pool."""
-        await self.pool.wait()
-        logger.info("QuestDB connection pool initialized", pool_size=self.pool.max_size)
+    async def open(self):
+        await self.pool.open()
+        logger.info("QuestDB connection pool opened", pool_size=self.pool.max_size)
 
     async def close(self):
-        """Close the connection pool."""
         await self.pool.close()
+        logger.info("QuestDB connection pool closed.")
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10))
     async def write_batch(self, metrics: List[CellMetric]):
-        """Write a batch of metrics to QuestDB using the high-performance COPY protocol."""
         if not metrics:
             return
 
